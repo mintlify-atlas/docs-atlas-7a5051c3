@@ -1,80 +1,450 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: 'Quickstart'
+description: 'Get started with Yellowstone gRPC in 5 minutes'
 ---
 
-## Get started in three steps
+## Prerequisites
 
-Get your documentation site running locally and make your first customization.
+Before you begin, make sure you have:
 
-### Step 1: Set up your local environment
+- **Rust** (1.70 or later) or **Node.js** (16 or later)
+- Access to a Yellowstone gRPC endpoint
+- Optional: Authentication token (x-token) for protected endpoints
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+## Installation
+
+<CodeGroup>
+
+```bash Rust
+# Add to Cargo.toml
+[dependencies]
+yellowstone-grpc-client = "2.0.0"
+yellowstone-grpc-proto = "2.0.0"
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+```
+
+```bash TypeScript
+npm install @triton-one/yellowstone-grpc
+```
+
+</CodeGroup>
+
+## Your First Stream
+
+<Steps>
+
+<Step title="Connect to Yellowstone gRPC">
+
+Establish a connection to the gRPC server with your endpoint.
+
+<CodeGroup>
+
+```rust Rust
+use yellowstone_grpc_client::GeyserGrpcClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Build client with endpoint
+    let client = GeyserGrpcClient::build_from_shared("http://127.0.0.1:10000")?
+        .x_token(None::<String>)?  // Add your token here if needed
+        .connect()
+        .await?;
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    println!("Connected to Yellowstone gRPC!");
+    Ok(())
+}
+```
 
-### Step 2: Deploy your changes
+```typescript TypeScript
+import Client from "@triton-one/yellowstone-grpc";
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+async function main() {
+  // Create client instance
+  const client = new Client(
+    "http://127.0.0.1:10000",
+    undefined,  // Add your x-token here if needed
+    undefined
+  );
+  
+  // Connect to the server
+  await client.connect();
+  console.log("Connected to Yellowstone gRPC!");
+}
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+main();
+```
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+</CodeGroup>
 
-### Step 3: Go live
+</Step>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+<Step title="Create a Subscription Request">
 
-## Next steps
+Define what data you want to receive using filters. This example subscribes to slot updates.
 
-Now that you have your docs running, explore these key features:
+<CodeGroup>
+
+```rust Rust
+use yellowstone_grpc_proto::prelude::{
+    SubscribeRequest,
+    SubscribeRequestFilterSlots,
+};
+use std::collections::HashMap;
+
+// Create slots filter
+let mut slots = HashMap::new();
+slots.insert(
+    "client".to_string(),
+    SubscribeRequestFilterSlots {
+        filter_by_commitment: Some(true),
+        ..Default::default()
+    },
+);
+
+// Build subscribe request
+let request = SubscribeRequest {
+    slots,
+    accounts: HashMap::new(),
+    transactions: HashMap::new(),
+    transactions_status: HashMap::new(),
+    entry: HashMap::new(),
+    blocks: HashMap::new(),
+    blocks_meta: HashMap::new(),
+    commitment: None,
+    accounts_data_slice: vec![],
+    ping: None,
+    from_slot: None,
+};
+```
+
+```typescript TypeScript
+import { SubscribeRequest } from "@triton-one/yellowstone-grpc";
+
+// Create subscription request
+const request: SubscribeRequest = {
+  slots: {
+    client: {
+      filterByCommitment: true,
+    }
+  },
+  accounts: {},
+  transactions: {},
+  transactionsStatus: {},
+  entry: {},
+  blocks: {},
+  blocksMeta: {},
+  accountsDataSlice: [],
+  ping: undefined,
+};
+```
+
+</CodeGroup>
+
+</Step>
+
+<Step title="Handle Streaming Updates">
+
+Process the stream of updates from Yellowstone gRPC.
+
+<CodeGroup>
+
+```rust Rust
+use futures::stream::StreamExt;
+use yellowstone_grpc_proto::prelude::subscribe_update::UpdateOneof;
+
+let (mut subscribe_tx, mut stream) = client.subscribe_with_request(Some(request)).await?;
+
+println!("Stream opened, receiving updates...");
+
+while let Some(message) = stream.next().await {
+    match message {
+        Ok(msg) => {
+            match msg.update_oneof {
+                Some(UpdateOneof::Slot(slot_update)) => {
+                    println!(
+                        "Slot: {}, Parent: {}, Status: {:?}",
+                        slot_update.slot,
+                        slot_update.parent,
+                        slot_update.status
+                    );
+                }
+                Some(UpdateOneof::Ping(_)) => {
+                    // Respond to ping to keep connection alive
+                    println!("Received ping");
+                }
+                _ => {}
+            }
+        }
+        Err(error) => {
+            eprintln!("Stream error: {:?}", error);
+            break;
+        }
+    }
+}
+```
+
+```typescript TypeScript
+// Subscribe and get stream
+const stream = await client.subscribe();
+
+// Handle incoming data
+stream.on("data", (data) => {
+  if (data.slot) {
+    console.log(
+      `Slot: ${data.slot.slot}, Parent: ${data.slot.parent}, Status: ${data.slot.status}`
+    );
+  }
+});
+
+// Handle errors
+stream.on("error", (error) => {
+  console.error("Stream error:", error);
+  stream.end();
+});
+
+// Send subscription request
+stream.write(request, (err) => {
+  if (err) throw err;
+  console.log("Subscription request sent!");
+});
+```
+
+</CodeGroup>
+
+</Step>
+
+</Steps>
+
+## Common Subscription Patterns
+
+### Subscribe to Account Updates
+
+Monitor specific accounts or filter by owner, data size, or lamport balance.
+
+<CodeGroup>
+
+```rust Rust
+use yellowstone_grpc_proto::prelude::SubscribeRequestFilterAccounts;
+
+let mut accounts = HashMap::new();
+accounts.insert(
+    "client".to_string(),
+    SubscribeRequestFilterAccounts {
+        account: vec!["Vote111111111111111111111111111111111111111".to_string()],
+        owner: vec![],
+        filters: vec![],
+        nonempty_txn_signature: None,
+    },
+);
+
+let request = SubscribeRequest {
+    accounts,
+    ..Default::default()
+};
+```
+
+```typescript TypeScript
+const request: SubscribeRequest = {
+  accounts: {
+    client: {
+      account: ["Vote111111111111111111111111111111111111111"],
+      owner: [],
+      filters: [],
+    }
+  },
+  slots: {},
+  transactions: {},
+  transactionsStatus: {},
+  entry: {},
+  blocks: {},
+  blocksMeta: {},
+  accountsDataSlice: [],
+  ping: undefined,
+};
+```
+
+</CodeGroup>
+
+### Subscribe to Transactions
+
+Filter transactions by vote status, account involvement, or success/failure.
+
+<CodeGroup>
+
+```rust Rust
+use yellowstone_grpc_proto::prelude::SubscribeRequestFilterTransactions;
+
+let mut transactions = HashMap::new();
+transactions.insert(
+    "client".to_string(),
+    SubscribeRequestFilterTransactions {
+        vote: Some(false),  // Exclude vote transactions
+        failed: Some(false),  // Only successful transactions
+        signature: None,
+        account_include: vec!["YourProgramId111111111111111111111111111111".to_string()],
+        account_exclude: vec![],
+        account_required: vec![],
+    },
+);
+
+let request = SubscribeRequest {
+    transactions,
+    ..Default::default()
+};
+```
+
+```typescript TypeScript
+const request: SubscribeRequest = {
+  transactions: {
+    client: {
+      vote: false,  // Exclude vote transactions
+      failed: false,  // Only successful transactions
+      accountInclude: ["YourProgramId111111111111111111111111111111"],
+      accountExclude: [],
+      accountRequired: [],
+    }
+  },
+  accounts: {},
+  slots: {},
+  transactionsStatus: {},
+  entry: {},
+  blocks: {},
+  blocksMeta: {},
+  accountsDataSlice: [],
+  ping: undefined,
+};
+```
+
+</CodeGroup>
+
+### Subscribe to Blocks
+
+Receive complete block data including transactions, accounts, and entries.
+
+<CodeGroup>
+
+```rust Rust
+use yellowstone_grpc_proto::prelude::SubscribeRequestFilterBlocks;
+
+let mut blocks = HashMap::new();
+blocks.insert(
+    "client".to_string(),
+    SubscribeRequestFilterBlocks {
+        account_include: vec![],
+        include_transactions: Some(true),
+        include_accounts: Some(false),
+        include_entries: Some(false),
+    },
+);
+
+let request = SubscribeRequest {
+    blocks,
+    ..Default::default()
+};
+```
+
+```typescript TypeScript
+const request: SubscribeRequest = {
+  blocks: {
+    client: {
+      accountInclude: [],
+      includeTransactions: true,
+      includeAccounts: false,
+      includeEntries: false,
+    }
+  },
+  accounts: {},
+  slots: {},
+  transactions: {},
+  transactionsStatus: {},
+  entry: {},
+  blocksMeta: {},
+  accountsDataSlice: [],
+  ping: undefined,
+};
+```
+
+</CodeGroup>
+
+## Ping/Pong for Connection Keepalive
+
+Some load balancers require periodic client activity to maintain connections. Handle ping/pong to keep your stream alive.
+
+<CodeGroup>
+
+```rust Rust
+use yellowstone_grpc_proto::prelude::{
+    SubscribeRequestPing,
+    subscribe_update::UpdateOneof,
+};
+
+while let Some(message) = stream.next().await {
+    match message {
+        Ok(msg) => {
+            match msg.update_oneof {
+                Some(UpdateOneof::Ping(_)) => {
+                    // Respond to server ping
+                    subscribe_tx.send(SubscribeRequest {
+                        ping: Some(SubscribeRequestPing { id: 1 }),
+                        ..Default::default()
+                    }).await?;
+                }
+                Some(UpdateOneof::Pong(_)) => {
+                    // Server acknowledged our ping
+                }
+                _ => { /* Handle other updates */ }
+            }
+        }
+        Err(error) => break,
+    }
+}
+```
+
+```typescript TypeScript
+stream.on("data", (data) => {
+  if (data.ping) {
+    // Respond to server ping
+    stream.write({
+      ping: { id: 1 },
+      accounts: {},
+      slots: {},
+      transactions: {},
+      transactionsStatus: {},
+      entry: {},
+      blocks: {},
+      blocksMeta: {},
+      accountsDataSlice: [],
+    });
+  }
+  
+  if (data.pong) {
+    // Server acknowledged our ping
+    console.log("Pong received");
+  }
+});
+```
+
+</CodeGroup>
+
+## Next Steps
 
 <CardGroup cols={2}>
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
+<Card title="Filters & Subscriptions" icon="filter" href="/guides/filtering">
+  Learn about advanced filtering options for accounts, transactions, and blocks
 </Card>
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
+<Card title="Plugin Configuration" icon="gear" href="/plugin/configuration">
+  Configure the Geyser plugin settings, compression, and message sizes
 </Card>
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
+<Card title="API Reference" icon="book" href="/api/subscribe">
+  Explore the complete gRPC API documentation
 </Card>
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
+<Card title="Client SDKs" icon="code" href="/clients/overview">
+  Browse client libraries for Rust, TypeScript, and other languages
 </Card>
 
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

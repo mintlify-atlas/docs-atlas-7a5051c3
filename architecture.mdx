@@ -1,0 +1,494 @@
+---
+title: Architecture
+description: Understand how Yellowstone gRPC works - from Geyser plugin integration to real-time data streaming
+---
+
+Yellowstone gRPC (formerly known as "Yellowstone Dragon's Mouth") is a high-performance gRPC interface for Solana that enables real-time streaming of blockchain data. It's built on top of Solana's Geyser plugin interface and provides a standardized way to access slots, blocks, transactions, and account updates.
+
+## System Overview
+
+<Frame>
+```
+┌─────────────────────────────────────────────────────────┐
+│                  Solana Validator                       │
+│                                                         │
+│  ┌──────────────────────────────────────────────┐     │
+│  │          Validator Runtime                    │     │
+│  │  • Block Processing                           │     │
+│  │  • Transaction Execution                      │     │
+│  │  │  • Account Updates                          │     │
+│  └──────────────────┬───────────────────────────┘     │
+│                     │                                   │
+│                     │ Geyser Interface                  │
+│                     ▼                                   │
+│  ┌──────────────────────────────────────────────┐     │
+│  │    Yellowstone gRPC Geyser Plugin            │     │
+│  │  • Receive updates from validator             │     │
+│  │  • Block reconstruction                       │     │
+│  │  • Apply filters                              │     │
+│  │  • Encode to protobuf                         │     │
+│  └──────────────────┬───────────────────────────┘     │
+└────────────────────┬┼────────────────────────────────┘
+                     │
+                     │ gRPC (HTTP/2)
+                     │
+       ┌─────────────┴──────────────┐
+       │                            │
+       ▼                            ▼
+  ┌─────────┐                  ┌─────────┐
+  │ Client  │                  │ Client  │
+  │  Rust   │                  │TypeScript│
+  └─────────┘                  └─────────┘
+```
+</Frame>
+
+## Core Components
+
+### Geyser Plugin Interface
+
+The [Geyser plugin interface](https://docs.solana.com/developing/plugins/geyser-plugins) is Solana's official mechanism for validators to stream data to external systems. Yellowstone gRPC implements this interface to receive real-time updates directly from the validator.
+
+The Geyser interface provides callbacks for:
+
+- **`update_account`** - Called when an account is modified
+- **`notify_transaction`** - Called when a transaction is processed
+- **`notify_entry`** - Called when an entry is added to a block
+- **`notify_block_metadata`** - Called when block metadata is available
+- **`notify_slot_status`** - Called when slot status changes
+
+Yellowstone gRPC receives these callbacks and transforms them into gRPC stream messages.
+
+### Plugin Configuration
+
+The plugin is loaded by the Solana validator at startup using a configuration file:
+
+```bash
+solana-validator --geyser-plugin-config yellowstone-grpc-geyser/config.json
+```
+
+Example configuration (`config.json`):
+
+```json
+{
+  "libpath": "./target/release/libyellowstone_grpc_geyser.so",
+  "log": {
+    "level": "info"
+  },
+  "grpc": {
+    "address": "0.0.0.0:10000",
+    "tls_config": {
+      "cert_path": "",
+      "key_path": ""
+    },
+    "compression": {
+      "accept": ["gzip", "zstd"],
+      "send": ["gzip", "zstd"]
+    },
+    "max_decoding_message_size": "4_194_304",
+    "channel_capacity": "100_000",
+    "unary_concurrency_limit": 100
+  },
+  "prometheus": {
+    "address": "0.0.0.0:8999"
+  }
+}
+```
+
+Key configuration options:
+
+- **`address`** - gRPC server bind address
+- **`tls_config`** - Optional TLS certificate and key paths
+- **`compression`** - Enable gzip or zstd compression
+- **`channel_capacity`** - Internal buffer size for streaming
+- **`max_decoding_message_size`** - Maximum message size (important for large blocks)
+
+### Block Reconstruction
+
+One of Yellowstone gRPC's key features is block reconstruction. The Geyser interface provides individual updates (accounts, transactions, entries) but not complete blocks. Yellowstone reconstructs full blocks by:
+
+1. **Collecting Updates** - Gathering all account updates, transactions, and entries for a slot
+2. **Ordering** - Ensuring updates are in the correct order based on write version
+3. **Assembling** - Combining updates into a complete block structure
+4. **Validation** - Verifying block completeness and consistency
+
+<Warning>
+**Known Limitation**: Block reconstruction relies on `BlockMeta` from the validator. For blocks generated on validators (not replayed), the number of entries is always zero. This is a known issue in Solana: [solana-labs/solana#33823](https://github.com/solana-labs/solana/issues/33823)
+</Warning>
+
+You can configure block reconstruction behavior:
+
+```json
+{
+  "grpc": {
+    "block_fail_action": "log"  // or "panic" to crash on invalid blocks
+  }
+}
+```
+
+## Data Flow
+
+### 1. Update Reception
+
+When the Solana validator processes data, it calls Yellowstone's Geyser plugin callbacks:
+
+```rust
+// Simplified plugin callback
+impl GeyserPlugin for YellowstoneGrpcPlugin {
+    fn update_account(
+        &self,
+        account: ReplicaAccountInfoVersions,
+        slot: u64,
+        is_startup: bool,
+    ) -> PluginResult<()> {
+        // Convert to protobuf
+        let update = convert_account_to_proto(account, slot, is_startup);
+        
+        // Send to subscribed clients
+        self.broadcast_update(update);
+        
+        Ok(())
+    }
+}
+```
+
+### 2. Filtering
+
+Before sending updates to clients, Yellowstone applies subscription filters. This happens server-side to minimize bandwidth and client processing.
+
+Filter types:
+
+<AccordionGroup>
+
+<Accordion title="Account Filters" icon="database">
+
+Filter accounts by:
+- **Pubkey** - Specific account addresses
+- **Owner** - Program that owns the account
+- **Data size** - Account data length
+- **Memcmp** - Memory comparison at specific offsets
+- **Lamports** - Account balance comparisons (eq, ne, lt, gt)
+- **Token account state** - Valid SPL token accounts only
+
+```rust
+SubscribeRequestFilterAccounts {
+    account: vec!["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()],
+    owner: vec![],
+    filters: vec![
+        SubscribeRequestFilterAccountsFilter {
+            filter: Some(Filter::Datasize(165)), // SPL token account size
+        },
+    ],
+}
+```
+
+</Accordion>
+
+<Accordion title="Transaction Filters" icon="code-commit">
+
+Filter transactions by:
+- **Vote** - Include/exclude vote transactions
+- **Failed** - Include/exclude failed transactions
+- **Signature** - Specific transaction signature
+- **Account include** - Transactions using any of these accounts
+- **Account exclude** - Transactions NOT using these accounts
+- **Account required** - Transactions using ALL of these accounts
+
+```rust
+SubscribeRequestFilterTransactions {
+    vote: Some(false),  // Exclude vote transactions
+    failed: Some(false), // Exclude failed transactions
+    account_include: vec!["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()],
+    ..Default::default()
+}
+```
+
+</Accordion>
+
+<Accordion title="Slot Filters" icon="clock">
+
+Filter slot updates by:
+- **Commitment level** - Only receive slots at specific commitment
+- **Interslot updates** - Receive all slot status changes
+
+```rust
+SubscribeRequestFilterSlots {
+    filter_by_commitment: Some(true),
+    interslot_updates: Some(false),
+}
+```
+
+</Accordion>
+
+<Accordion title="Block Filters" icon="cube">
+
+Filter blocks by:
+- **Account include** - Blocks with transactions touching these accounts
+- **Include transactions** - Include full transaction data
+- **Include accounts** - Include account update data
+- **Include entries** - Include entry data
+
+```rust
+SubscribeRequestFilterBlocks {
+    account_include: vec![],
+    include_transactions: Some(true),
+    include_accounts: Some(true),
+    include_entries: Some(false),
+}
+```
+
+</Accordion>
+
+</AccordionGroup>
+
+### 3. Streaming Protocol
+
+Yellowstone uses **bidirectional gRPC streaming** over HTTP/2:
+
+- **Client → Server**: Subscription requests, filter updates, ping responses
+- **Server → Client**: Account updates, transactions, slots, blocks, pings
+
+The streaming model provides:
+
+- **Low latency** - Updates stream as they occur
+- **Backpressure** - Client controls flow rate
+- **Multiplexing** - Multiple streams over one connection
+- **Compression** - gzip/zstd support for bandwidth efficiency
+
+### 4. Commitment Levels
+
+Yellowstone respects Solana's commitment levels:
+
+| Level | Description | Speed | Finality |
+|-------|-------------|-------|----------|
+| **Processed** | Received by validator | Fastest | Lowest |
+| **Confirmed** | Supermajority vote | Medium | Medium |
+| **Finalized** | 32+ confirmed blocks | Slowest | Highest |
+
+Set commitment level in your subscription:
+
+```rust
+let request = SubscribeRequest {
+    commitment: Some(CommitmentLevel::Confirmed as i32),
+    // ...
+};
+```
+
+## Performance Characteristics
+
+### Throughput
+
+Yellowstone gRPC is designed for high-throughput environments:
+
+- **Parallel processing** - Configurable worker threads for encoding
+- **Zero-copy** - Efficient memory handling for large messages
+- **Compression** - Reduces bandwidth by 60-80% with zstd
+- **Batching** - Internal batching for network efficiency
+
+Configuration example:
+
+```json
+{
+  "tokio": {
+    "worker_threads": 8,
+    "affinity": "0-1,12-13"  // Pin threads to specific CPU cores
+  }
+}
+```
+
+### Resource Usage
+
+<Note>
+Yellowstone runs inside the validator process and shares resources:
+
+- **CPU**: Additional encoding and filtering overhead (typically 5-10%)
+- **Memory**: Buffering for clients (configure `channel_capacity`)
+- **Network**: Outbound bandwidth for all connected clients
+
+Monitor resource usage via the built-in Prometheus metrics endpoint.
+</Note>
+
+### Metrics and Monitoring
+
+Yellowstone exposes Prometheus metrics at the configured endpoint:
+
+```bash
+curl http://localhost:8999/metrics
+```
+
+Key metrics:
+
+- `invalid_full_blocks_total` - Failed block reconstructions
+- `grpc_active_connections` - Current client connections
+- `grpc_messages_sent_total` - Total messages streamed
+- `grpc_bytes_sent_total` - Total bytes transmitted
+
+## Protocol Buffers Schema
+
+Yellowstone uses Protocol Buffers (protobuf) for efficient serialization. The main service definition:
+
+```protobuf
+service Geyser {
+  // Bidirectional streaming for real-time updates
+  rpc Subscribe(stream SubscribeRequest) returns (stream SubscribeUpdate) {}
+  
+  // Unary methods for quick queries
+  rpc GetLatestBlockhash(GetLatestBlockhashRequest) returns (GetLatestBlockhashResponse) {}
+  rpc GetBlockHeight(GetBlockHeightRequest) returns (GetBlockHeightResponse) {}
+  rpc GetSlot(GetSlotRequest) returns (GetSlotResponse) {}
+  rpc GetVersion(GetVersionRequest) returns (GetVersionResponse) {}
+  rpc Ping(PingRequest) returns (PongResponse) {}
+}
+```
+
+The protobuf schema is available at: `yellowstone-grpc-proto/proto/geyser.proto`
+
+## Security Considerations
+
+### Authentication
+
+Yellowstone supports token-based authentication via the `x-token` header:
+
+```json
+{
+  "grpc": {
+    "x_token": "your-secret-token"
+  }
+}
+```
+
+Clients must provide this token in metadata:
+
+```rust
+let client = GeyserGrpcClient::build_from_shared(endpoint)?
+    .x_token(Some("your-secret-token".to_string()))?
+    .connect()
+    .await?;
+```
+
+### TLS/SSL
+
+For production deployments, enable TLS:
+
+```json
+{
+  "grpc": {
+    "tls_config": {
+      "cert_path": "/path/to/cert.pem",
+      "key_path": "/path/to/key.pem"
+    }
+  }
+}
+```
+
+### Rate Limiting
+
+Configure filter limits to prevent resource exhaustion:
+
+```json
+{
+  "grpc": {
+    "filter_limits": {
+      "accounts": {
+        "max": 1,
+        "account_max": 10,
+        "owner_max": 10,
+        "account_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"]
+      },
+      "transactions": {
+        "max": 1,
+        "account_include_max": 10
+      }
+    }
+  }
+}
+```
+
+## Comparison with Other Approaches
+
+### vs JSON RPC
+
+| Feature | Yellowstone gRPC | JSON RPC |
+|---------|------------------|----------|
+| Protocol | HTTP/2 + Protobuf | HTTP/1.1 + JSON |
+| Streaming | Native bidirectional | Polling required |
+| Latency | Real-time (milliseconds) | Polling interval |
+| Bandwidth | Compressed, efficient | Verbose JSON |
+| Filtering | Server-side | Client-side |
+
+### vs WebSocket
+
+| Feature | Yellowstone gRPC | WebSocket |
+|---------|------------------|----------|
+| Protocol | Typed (protobuf) | Untyped (JSON) |
+| Code generation | Built-in | Manual |
+| Compression | gzip, zstd | Manual |
+| Flow control | Built-in backpressure | Manual |
+| Error handling | Strongly typed | String messages |
+
+## Advanced Features
+
+### Accounts Data Slicing
+
+Reduce bandwidth by requesting only part of account data:
+
+```rust
+let request = SubscribeRequest {
+    accounts_data_slice: vec![
+        SubscribeRequestAccountsDataSlice {
+            offset: 0,
+            length: 32,  // Only first 32 bytes
+        },
+    ],
+    // ...
+};
+```
+
+### Historical Replay
+
+Subscribe from a specific slot:
+
+```rust
+let request = SubscribeRequest {
+    from_slot: Some(150_000_000),
+    // ...
+};
+```
+
+<Warning>
+Historical replay requires the validator to have retained the requested slots. Check availability with `SubscribeReplayInfo`.
+</Warning>
+
+### Dynamic Resubscription
+
+Update your subscription without reconnecting:
+
+```rust
+// Send a new subscription request on the same stream
+subscribe_tx.send(SubscribeRequest {
+    slots: new_slot_filters,
+    accounts: HashMap::new(),  // Clear account subscription
+    // ...
+}).await?;
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+
+<Card title="Quickstart" icon="rocket" href="/quickstart">
+  Start streaming Solana data in minutes
+</Card>
+
+<Card title="Filters Guide" icon="filter" href="/guides/filtering">
+  Master advanced filtering techniques
+</Card>
+
+<Card title="API Reference" icon="book" href="/api/subscribe">
+  Complete API documentation
+</Card>
+
+<Card title="GitHub" icon="github" href="https://github.com/rpcpool/yellowstone-grpc">
+  View source code and contribute
+</Card>
+
+</CardGroup>

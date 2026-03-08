@@ -1,0 +1,471 @@
+---
+title: 'Ping/Pong Mechanism'
+description: 'Keep your gRPC connection alive with ping/pong heartbeats'
+---
+
+## Overview
+
+Some cloud providers and load balancers (like Cloudflare, Fly.io) automatically close gRPC connections if the client doesn't send any data for a period of time. The ping/pong mechanism keeps your connection alive by periodically exchanging heartbeat messages.
+
+## How It Works
+
+Yellowstone gRPC implements a bidirectional ping/pong mechanism:
+
+1. **Server sends Ping** - The gRPC server sends a `Ping` message to the client every 15 seconds
+2. **Client responds with Pong** - The client should respond by sending a `SubscribeRequest` with a `ping` field
+3. **Server sends Pong** - The server acknowledges with a `Pong` message containing the ping ID
+
+```protobuf
+message SubscribeRequestPing {
+  int32 id = 1;
+}
+
+message SubscribeUpdatePing {}
+
+message SubscribeUpdatePong {
+  int32 id = 1;
+}
+```
+
+## Basic Implementation
+
+<Tabs>
+  <Tab title="Rust">
+    The Rust example shows the complete bidirectional ping/pong implementation:
+
+    ```rust
+    use yellowstone_grpc_proto::prelude::{
+        subscribe_update::UpdateOneof,
+        SubscribeRequest,
+        SubscribeRequestPing,
+    };
+    use futures::{sink::SinkExt, stream::StreamExt};
+
+    let (mut subscribe_tx, mut stream) = client.subscribe().await?;
+
+    // Send initial subscription
+    subscribe_tx.send(SubscribeRequest {
+        slots,
+        accounts,
+        commitment: Some(CommitmentLevel::Confirmed as i32),
+        ..Default::default()
+    }).await?;
+
+    // Handle incoming messages
+    while let Some(message) = stream.next().await {
+        match message?.update_oneof {
+            Some(UpdateOneof::Ping(_)) => {
+                // Server sent ping - respond with pong
+                subscribe_tx.send(SubscribeRequest {
+                    ping: Some(SubscribeRequestPing { id: 1 }),
+                    ..Default::default()
+                }).await?;
+                println!("Received ping from server, sent pong");
+            }
+            Some(UpdateOneof::Pong(pong)) => {
+                println!("Received pong from server: id#{}", pong.id);
+            }
+            Some(UpdateOneof::Account(account)) => {
+                // Handle account update
+            }
+            Some(UpdateOneof::Transaction(tx)) => {
+                // Handle transaction update
+            }
+            // ... other update types
+            _ => {}
+        }
+    }
+    ```
+  </Tab>
+
+  <Tab title="TypeScript">
+    ```typescript
+    import Client, {
+      CommitmentLevel,
+      SubscribeRequest,
+    } from "@triton-one/yellowstone-grpc";
+
+    const client = new Client(endpoint, token);
+    await client.connect();
+
+    const stream = await client.subscribe();
+
+    // Handle incoming data
+    stream.on("data", (data) => {
+      if (data.ping) {
+        // Server sent ping - respond with pong
+        stream.write({
+          ping: { id: 1 },
+        });
+        console.log("Received ping from server, sent pong");
+      } else if (data.pong) {
+        console.log(`Received pong from server: id#${data.pong.id}`);
+      } else if (data.account) {
+        // Handle account update
+      } else if (data.transaction) {
+        // Handle transaction update
+      }
+    });
+
+    // Send initial subscription
+    stream.write({
+      accounts: {
+        client: {
+          account: [],
+          owner: ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+        },
+      },
+      commitment: CommitmentLevel.CONFIRMED,
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Complete Working Example
+
+Here's the complete Rust example from the Yellowstone gRPC repository:
+
+```rust
+use {
+    clap::Parser,
+    futures::{sink::SinkExt, stream::StreamExt},
+    log::info,
+    std::env,
+    tokio::time::{interval, Duration},
+    tonic::transport::channel::ClientTlsConfig,
+    yellowstone_grpc_client::GeyserGrpcClient,
+    yellowstone_grpc_proto::prelude::{
+        subscribe_update::UpdateOneof, CommitmentLevel, SubscribeRequest,
+        SubscribeRequestFilterSlots, SubscribeRequestPing, SubscribeUpdatePong,
+        SubscribeUpdateSlot,
+    },
+};
+
+#[derive(Debug, Clone, Parser)]
+#[clap(author, version, about)]
+struct Args {
+    #[clap(short, long, default_value_t = String::from("http://127.0.0.1:10000"))]
+    endpoint: String,
+
+    #[clap(long)]
+    x_token: Option<String>,
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    env::set_var(
+        env_logger::DEFAULT_FILTER_ENV,
+        env::var_os(env_logger::DEFAULT_FILTER_ENV).unwrap_or_else(|| "info".into()),
+    );
+    env_logger::init();
+
+    let args = Args::parse();
+
+    let mut client = GeyserGrpcClient::build_from_shared(args.endpoint)?
+        .x_token(args.x_token)?
+        .tls_config(ClientTlsConfig::new().with_native_roots())?
+        .connect()
+        .await?;
+    
+    let (mut subscribe_tx, mut stream) = client.subscribe().await?;
+
+    futures::try_join!(
+        async move {
+            // Send initial subscription
+            subscribe_tx
+                .send(SubscribeRequest {
+                    slots: maplit::hashmap! {
+                        "".to_owned() => SubscribeRequestFilterSlots {
+                            filter_by_commitment: Some(true),
+                            interslot_updates: Some(false)
+                        }
+                    },
+                    commitment: Some(CommitmentLevel::Processed as i32),
+                    ..Default::default()
+                })
+                .await?;
+
+            // Send periodic pings every 3 seconds
+            let mut timer = interval(Duration::from_secs(3));
+            let mut id = 0;
+            loop {
+                timer.tick().await;
+                id += 1;
+                subscribe_tx
+                    .send(SubscribeRequest {
+                        ping: Some(SubscribeRequestPing { id }),
+                        ..Default::default()
+                    })
+                    .await?;
+            }
+            #[allow(unreachable_code)]
+            Ok::<(), anyhow::Error>(())
+        },
+        async move {
+            while let Some(message) = stream.next().await {
+                match message?.update_oneof.expect("valid message") {
+                    UpdateOneof::Slot(SubscribeUpdateSlot { slot, .. }) => {
+                        info!("slot received: {slot}");
+                    }
+                    UpdateOneof::Ping(_msg) => {
+                        info!("ping received");
+                    }
+                    UpdateOneof::Pong(SubscribeUpdatePong { id }) => {
+                        info!("pong received: id#{id}");
+                    }
+                    msg => anyhow::bail!("received unexpected message: {msg:?}"),
+                }
+            }
+            Ok::<(), anyhow::Error>(())
+        }
+    )?;
+
+    Ok(())
+}
+```
+
+This example shows:
+- Initial subscription setup
+- Periodic client-initiated pings (every 3 seconds)
+- Handling server pings
+- Handling server pongs
+- Processing other updates (slots in this case)
+
+## Client-Initiated Pings
+
+While the server sends pings every 15 seconds, you can also send pings from the client at any interval:
+
+```rust
+use tokio::time::{interval, Duration};
+
+let mut timer = interval(Duration::from_secs(10));
+let mut id = 0;
+
+loop {
+    timer.tick().await;
+    id += 1;
+    
+    subscribe_tx.send(SubscribeRequest {
+        ping: Some(SubscribeRequestPing { id }),
+        ..Default::default()
+    }).await?;
+}
+```
+
+**Benefits:**
+- More frequent heartbeats if needed
+- Can detect connection issues faster
+- Useful for aggressive load balancers
+
+## Ping ID Tracking
+
+The `id` field in pings and pongs lets you track round-trip time:
+
+```rust
+use std::collections::HashMap;
+use std::time::Instant;
+
+let mut ping_times: HashMap<i32, Instant> = HashMap::new();
+let mut ping_id = 0;
+
+// Send ping
+ping_id += 1;
+ping_times.insert(ping_id, Instant::now());
+subscribe_tx.send(SubscribeRequest {
+    ping: Some(SubscribeRequestPing { id: ping_id }),
+    ..Default::default()
+}).await?;
+
+// Handle pong
+match message?.update_oneof {
+    Some(UpdateOneof::Pong(pong)) => {
+        if let Some(sent_at) = ping_times.remove(&pong.id) {
+            let rtt = sent_at.elapsed();
+            println!("Round trip time: {:?}", rtt);
+        }
+    }
+    _ => {}
+}
+```
+
+## When to Use Ping/Pong
+
+<CardGroup cols={2}>
+  <Card title="Required" icon="exclamation-triangle">
+    **Cloud Providers**
+    - Cloudflare
+    - Fly.io
+    - Some AWS configurations
+    - Load balancers with idle timeouts
+  </Card>
+
+  <Card title="Optional" icon="circle-check">
+    **Direct Connections**
+    - Direct validator connections
+    - Internal networks
+    - Short-lived connections
+    - Testing environments
+  </Card>
+
+  <Card title="Recommended" icon="thumbs-up">
+    **Production Systems**
+    - Long-lived subscriptions
+    - Critical monitoring
+    - Always-on services
+    - Connection health checks
+  </Card>
+
+  <Card title="Not Needed" icon="circle-xmark">
+    **Short Operations**
+    - One-time queries
+    - Quick tests
+    - Development without proxies
+  </Card>
+</CardGroup>
+
+## Handling Connection Issues
+
+Use ping/pong to detect and handle connection problems:
+
+```rust
+use tokio::time::{timeout, Duration};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+let last_pong = Arc::new(Mutex::new(Instant::now()));
+let last_pong_clone = Arc::clone(&last_pong);
+
+// Send pings every 10 seconds
+tokio::spawn(async move {
+    let mut timer = interval(Duration::from_secs(10));
+    let mut id = 0;
+    loop {
+        timer.tick().await;
+        id += 1;
+        
+        subscribe_tx.send(SubscribeRequest {
+            ping: Some(SubscribeRequestPing { id }),
+            ..Default::default()
+        }).await?;
+        
+        // Check if we haven't received a pong in 30 seconds
+        let last = *last_pong_clone.lock().await;
+        if last.elapsed() > Duration::from_secs(30) {
+            eprintln!("No pong received in 30 seconds - connection may be dead");
+            // Implement reconnection logic here
+            break;
+        }
+    }
+});
+
+// Update last pong time when received
+match message?.update_oneof {
+    Some(UpdateOneof::Pong(pong)) => {
+        *last_pong.lock().await = Instant::now();
+        println!("Pong received: id#{}", pong.id);
+    }
+    _ => {}
+}
+```
+
+## Ping/Pong with Deshred Subscriptions
+
+The ping/pong mechanism also works with deshred subscriptions:
+
+```rust
+use yellowstone_grpc_proto::prelude::{
+    SubscribeDeshredRequest,
+    SubscribeRequestFilterDeshredTransactions,
+    SubscribeRequestPing,
+    subscribe_update_deshred::UpdateOneof as DeshredUpdateOneof,
+};
+
+let (mut subscribe_tx, mut stream) = client.subscribe_deshred().await?;
+
+// Initial subscription
+subscribe_tx.send(SubscribeDeshredRequest {
+    deshred_transactions: hashmap! {
+        "client".to_string() => SubscribeRequestFilterDeshredTransactions {
+            vote: Some(false),
+            account_include: vec![],
+            account_exclude: vec![],
+            account_required: vec![],
+        }
+    },
+    ping: None,
+}).await?;
+
+// Handle updates
+while let Some(message) = stream.next().await {
+    match message?.update_oneof {
+        Some(DeshredUpdateOneof::Ping(_)) => {
+            subscribe_tx.send(SubscribeDeshredRequest {
+                ping: Some(SubscribeRequestPing { id: 1 }),
+                ..Default::default()
+            }).await?;
+        }
+        Some(DeshredUpdateOneof::Pong(pong)) => {
+            println!("Pong: id#{}", pong.id);
+        }
+        Some(DeshredUpdateOneof::DeshredTransaction(tx)) => {
+            // Handle deshred transaction
+        }
+        _ => {}
+    }
+}
+```
+
+## Best Practices
+
+1. **Always implement ping/pong** for production systems
+2. **Respond quickly to server pings** - don't block the event loop
+3. **Set reasonable intervals** - 3-15 seconds is typical
+4. **Track connection health** - monitor pong responses
+5. **Implement reconnection logic** - handle connection failures gracefully
+6. **Don't ping too frequently** - respect server resources
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Connection keeps closing">
+    - Make sure you're responding to server pings with pongs
+    - Check your load balancer/proxy timeout settings
+    - Implement client-initiated pings every 5-10 seconds
+    - Verify your ping response code is correct
+  </Accordion>
+
+  <Accordion title="Not receiving server pings">
+    - Server pings are sent every 15 seconds - wait at least 20 seconds
+    - Check that your stream is actively reading messages
+    - Verify your connection is established properly
+    - Look for ping messages in debug output
+  </Accordion>
+
+  <Accordion title="Pongs not coming back">
+    - Verify you're sending pings with the correct format
+    - Check that the ping ID is a valid i32
+    - Ensure the subscription channel is still open
+    - Look for errors in the stream
+  </Accordion>
+
+  <Accordion title="High latency on pongs">
+    - This may indicate network issues
+    - Check your network connection quality
+    - Monitor round-trip times over time
+    - Consider using a closer gRPC endpoint
+  </Accordion>
+</AccordionGroup>
+
+## Server Ping Interval
+
+<Info>
+The Yellowstone gRPC server sends ping messages every **15 seconds** by default. This is mentioned in the README:
+
+> "Since we sent a Ping message every 15s from the server, you can send a subscribe request with ping as a reply and receive a Pong message."
+</Info>
+
+## Next Steps
+
+- Learn about [Subscribing](/guides/subscribing) to set up your initial subscription
+- Implement [Filtering](/guides/filtering) to narrow down updates
+- Understand [Commitment Levels](/guides/commitment-levels) for your use case

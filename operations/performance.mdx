@@ -1,0 +1,431 @@
+---
+title: 'Performance Tuning'
+description: 'Optimize Yellowstone gRPC for maximum throughput and efficiency'
+---
+
+## Overview
+
+Yellowstone gRPC performance depends on several factors including Tokio runtime configuration, channel capacities, compression settings, and network parameters. This guide covers all available tuning options.
+
+## Tokio Runtime Configuration
+
+### Worker Threads
+
+Configure the number of Tokio worker threads based on your CPU cores and workload:
+
+```json
+{
+  "tokio": {
+    "worker_threads": 8
+  }
+}
+```
+
+<ParamField path="worker_threads" type="integer">
+  Number of worker threads in the Tokio runtime. Defaults to the number of CPU cores if not specified.
+</ParamField>
+
+**Recommendations:**
+- **Low traffic**: 2-4 threads
+- **Medium traffic**: 4-8 threads
+- **High traffic**: 8-16 threads
+- **Very high traffic**: 16+ threads (ensure you have sufficient CPU cores)
+
+### CPU Affinity
+
+Pin Tokio threads to specific CPU cores for better cache locality and performance:
+
+```json
+{
+  "tokio": {
+    "worker_threads": 4,
+    "affinity": "0-1,12-13"
+  }
+}
+```
+
+<ParamField path="affinity" type="string">
+  CPU core affinity specification. Use ranges (0-3) or individual cores (0,2,4) separated by commas.
+</ParamField>
+
+**Use cases:**
+- **NUMA systems**: Pin to cores on the same NUMA node as your network interface
+- **Hyper-threading**: Use physical cores (e.g., "0-3,8-11") or separate logical cores
+- **Shared systems**: Reserve specific cores for the plugin
+
+## Channel Capacity Tuning
+
+### Per-Connection Channel Capacity
+
+```json
+{
+  "grpc": {
+    "channel_capacity": "100_000"
+  }
+}
+```
+
+<ParamField path="channel_capacity" type="integer" default="250000">
+  Capacity of the channel per gRPC connection. Increase for high-throughput clients.
+</ParamField>
+
+**Recommendations:**
+- **Default**: 250,000 (works for most cases)
+- **High-frequency traders**: 500,000 - 1,000,000
+- **Low-resource environments**: 50,000 - 100,000
+
+<Warning>
+  Higher channel capacity increases memory usage. Monitor memory consumption when increasing this value.
+</Warning>
+
+### Snapshot Channel Capacity
+
+For snapshot operations (initial account loading):
+
+```json
+{
+  "grpc": {
+    "snapshot_plugin_channel_capacity": null,
+    "snapshot_client_channel_capacity": "50_000_000"
+  }
+}
+```
+
+<ParamField path="snapshot_plugin_channel_capacity" type="integer" default="null">
+  Capacity of the channel used for accounts from snapshot. When set, blocks validator startup if limit is reached.
+</ParamField>
+
+<ParamField path="snapshot_client_channel_capacity" type="integer" default="50000000">
+  Capacity of the client channel for snapshot data.
+</ParamField>
+
+## Compression Settings
+
+Configure compression algorithms for optimal bandwidth/CPU tradeoff:
+
+```json
+{
+  "grpc": {
+    "compression": {
+      "accept": ["gzip", "zstd"],
+      "send": ["gzip", "zstd"]
+    }
+  }
+}
+```
+
+<ParamField path="compression.accept" type="array" default='["gzip", "zstd"]'>
+  Compression algorithms accepted from clients.
+</ParamField>
+
+<ParamField path="compression.send" type="array" default='["gzip", "zstd"]'>
+  Compression algorithms used when sending data to clients.
+</ParamField>
+
+### Compression Algorithm Comparison
+
+| Algorithm | Compression Ratio | CPU Usage | Latency | Best For |
+|-----------|------------------|-----------|---------|----------|
+| **None** | 1.0x | Minimal | Lowest | Local networks, low CPU |
+| **gzip** | 3-4x | Medium | Medium | Balanced performance |
+| **zstd** | 3-5x | Low-Medium | Low | High throughput |
+
+**Recommendations:**
+- **Low bandwidth**: Use `["zstd", "gzip"]` for maximum compression
+- **Low latency**: Disable compression or use zstd only
+- **Balanced**: Default `["gzip", "zstd"]` works well
+
+## HTTP/2 Tuning
+
+### Adaptive Window
+
+Enable HTTP/2 adaptive flow control windows:
+
+```json
+{
+  "grpc": {
+    "server_http2_adaptive_window": true
+  }
+}
+```
+
+<ParamField path="server_http2_adaptive_window" type="boolean" default="null">
+  Enable adaptive HTTP/2 flow control windows for better throughput on high-latency connections.
+</ParamField>
+
+### Connection Window Sizes
+
+```json
+{
+  "grpc": {
+    "server_initial_connection_window_size": 1048576,
+    "server_initial_stream_window_size": 1048576
+  }
+}
+```
+
+<ParamField path="server_initial_connection_window_size" type="integer" default="65535">
+  Initial HTTP/2 connection window size in bytes. Increase for high-bandwidth connections.
+</ParamField>
+
+<ParamField path="server_initial_stream_window_size" type="integer" default="65535">
+  Initial HTTP/2 stream window size in bytes.
+</ParamField>
+
+**Recommendations:**
+- **Default**: 65,535 bytes (HTTP/2 default)
+- **High bandwidth**: 1,048,576 bytes (1 MiB)
+- **Very high bandwidth**: 4,194,304 bytes (4 MiB)
+
+### Keepalive Settings
+
+Preventing connection timeouts through load balancers:
+
+```json
+{
+  "grpc": {
+    "server_http2_keepalive_interval": "30s",
+    "server_http2_keepalive_timeout": "10s"
+  }
+}
+```
+
+<ParamField path="server_http2_keepalive_interval" type="duration" default="null">
+  Interval between HTTP/2 keepalive pings.
+</ParamField>
+
+<ParamField path="server_http2_keepalive_timeout" type="duration" default="null">
+  Timeout waiting for keepalive ping acknowledgment.
+</ParamField>
+
+<Note>
+  Most cloud load balancers (Cloudflare, AWS ALB, etc.) close idle connections after 30-120 seconds. Set keepalive_interval to 30-60 seconds to prevent disconnections.
+</Note>
+
+## Message Size Limits
+
+```json
+{
+  "grpc": {
+    "max_decoding_message_size": "4_194_304"
+  }
+}
+```
+
+<ParamField path="max_decoding_message_size" type="integer" default="4194304">
+  Maximum size of decoded messages in bytes (4 MiB default).
+</ParamField>
+
+**When to increase:**
+- Large account data subscriptions
+- Full block subscriptions with many transactions
+- Historical data replay
+
+## Concurrency Limits
+
+### Unary Request Concurrency
+
+```json
+{
+  "grpc": {
+    "unary_concurrency_limit": 100
+  }
+}
+```
+
+<ParamField path="unary_concurrency_limit" type="integer" default="unlimited">
+  Maximum concurrent unary RPC requests (GetLatestBlockhash, GetBlockHeight, etc.).
+</ParamField>
+
+### Subscription Limits
+
+```json
+{
+  "grpc": {
+    "subscription_limit": 1000,
+    "subscription_limit_enforce": false
+  }
+}
+```
+
+<ParamField path="subscription_limit" type="integer" default="1000">
+  Maximum concurrent subscriptions per subscriber ID (based on x-subscription-id header or remote IP).
+</ParamField>
+
+<ParamField path="subscription_limit_enforce" type="boolean" default="false">
+  When true, reject subscriptions exceeding the limit with RESOURCE_EXHAUSTED. When false, only log and emit metrics.
+</ParamField>
+
+## Encoding Performance
+
+### Encoder Threads
+
+```json
+{
+  "grpc": {
+    "encoder_threads": 4
+  }
+}
+```
+
+<ParamField path="encoder_threads" type="integer" default="4">
+  Number of threads for parallel message encoding.
+</ParamField>
+
+**Recommendations:**
+- **Low traffic**: 2 threads
+- **Medium traffic**: 4 threads (default)
+- **High traffic**: 8-16 threads
+
+## Filter Name Caching
+
+```json
+{
+  "grpc": {
+    "filter_name_size_limit": 128,
+    "filter_names_size_limit": 4096,
+    "filter_names_cleanup_interval": "1s"
+  }
+}
+```
+
+<ParamField path="filter_name_size_limit" type="integer" default="128">
+  Maximum size of individual filter names in bytes.
+</ParamField>
+
+<ParamField path="filter_names_size_limit" type="integer" default="4096">
+  Number of cached filter names before cleanup.
+</ParamField>
+
+<ParamField path="filter_names_cleanup_interval" type="duration" default="1s">
+  Interval for filter name cache cleanup once size limit is reached.
+</ParamField>
+
+## Replay Configuration
+
+```json
+{
+  "grpc": {
+    "replay_stored_slots": 0
+  }
+}
+```
+
+<ParamField path="replay_stored_slots" type="integer" default="0">
+  Number of recent slots to store for replay/retransmission. Set to 0 to disable.
+</ParamField>
+
+**Use cases:**
+- **Enable (100-1000 slots)**: When clients need to catch up on missed data
+- **Disable (0)**: For real-time only streams to save memory
+
+<Warning>
+  Replay functionality increases memory usage proportional to the number of stored slots and data volume.
+</Warning>
+
+## Traffic Reporting
+
+```json
+{
+  "grpc": {
+    "traffic_reporting_byte_threhsold": "64KiB"
+  }
+}
+```
+
+<ParamField path="traffic_reporting_byte_threhsold" type="string" default="64KiB">
+  Byte threshold for updating traffic metrics in Prometheus.
+</ParamField>
+
+**Lower values** = more accurate metrics, higher overhead  
+**Higher values** = less overhead, coarser metrics
+
+## Performance Monitoring
+
+Track these Prometheus metrics to validate tuning:
+
+```promql
+# Message throughput
+rate(grpc_message_sent_count[1m])
+
+# Bandwidth usage
+rate(grpc_bytes_sent[1m])
+
+# Queue backlog (should stay low)
+message_queue_size
+
+# Cache efficiency
+rate(yellowstone_grpc_pre_encoded_cache_hit[5m]) / 
+  (rate(yellowstone_grpc_pre_encoded_cache_hit[5m]) + 
+   rate(yellowstone_grpc_pre_encoded_cache_miss[5m]))
+```
+
+## Example Configurations
+
+### High-Throughput Configuration
+
+For maximum throughput with sufficient resources:
+
+```json
+{
+  "tokio": {
+    "worker_threads": 16,
+    "affinity": "0-7,16-23"
+  },
+  "grpc": {
+    "channel_capacity": "500_000",
+    "compression": {
+      "accept": ["zstd"],
+      "send": ["zstd"]
+    },
+    "encoder_threads": 8,
+    "server_http2_adaptive_window": true,
+    "server_initial_connection_window_size": 4194304,
+    "server_initial_stream_window_size": 4194304
+  }
+}
+```
+
+### Low-Latency Configuration
+
+For minimum latency:
+
+```json
+{
+  "tokio": {
+    "worker_threads": 8,
+    "affinity": "0-7"
+  },
+  "grpc": {
+    "channel_capacity": "100_000",
+    "compression": {
+      "accept": [],
+      "send": []
+    },
+    "encoder_threads": 4
+  }
+}
+```
+
+### Resource-Constrained Configuration
+
+For limited CPU/memory environments:
+
+```json
+{
+  "tokio": {
+    "worker_threads": 2
+  },
+  "grpc": {
+    "channel_capacity": "50_000",
+    "compression": {
+      "accept": ["gzip"],
+      "send": ["gzip"]
+    },
+    "encoder_threads": 2,
+    "unary_concurrency_limit": 50,
+    "subscription_limit": 100,
+    "subscription_limit_enforce": true
+  }
+}
+```

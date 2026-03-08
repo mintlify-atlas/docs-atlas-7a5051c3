@@ -1,0 +1,76 @@
+---
+title: 'Client SDKs Overview'
+description: 'Official and community client libraries for connecting to Yellowstone gRPC'
+---
+
+Yellowstone gRPC provides official client libraries for Rust and TypeScript/Node.js, along with examples for connecting from other popular languages.
+
+## Official Client Libraries
+
+Yellowstone maintains two official client SDKs with full support for all gRPC methods:
+
+<CardGroup cols={2}>
+  <Card title="Rust Client" icon="rust" href="/clients/rust">
+    Native Rust client with async/await support and type-safe APIs
+  </Card>
+  <Card title="TypeScript Client" icon="node-js" href="/clients/typescript">
+    Node.js client with native bindings for high performance
+  </Card>
+</CardGroup>
+
+## Other Languages
+
+Yellowstone gRPC uses standard Protocol Buffers and gRPC, making it accessible from any language with gRPC support:
+
+<Card title="Go, Python & More" icon="code" href="/clients/other-languages">
+  Examples for connecting with Go, Python, and any gRPC-compatible library
+</Card>
+
+## Key Features
+
+All clients support the full Yellowstone gRPC API:
+
+- **Streaming Subscriptions** - Real-time account, transaction, slot, and block updates
+- **Bidirectional Streaming** - Dynamic subscription management
+- **Unary RPC Methods** - Query current state (slot, block height, version)
+- **Health Checks** - Monitor server availability
+- **Authentication** - Token-based auth with `x-token` header
+- **TLS Support** - Secure connections with custom certificates
+
+## Choosing a Client
+
+### Use the Rust Client If:
+- You're building Solana validators, bots, or high-performance indexers
+- You need minimal latency and maximum throughput
+- You prefer type-safe, compile-time guarantees
+- You're already using Rust in your stack
+
+### Use the TypeScript Client If:
+- You're building web applications or Node.js services
+- You want a familiar JavaScript/TypeScript development experience
+- You need to integrate with existing Node.js infrastructure
+- You prefer dynamic typing and rapid iteration
+
+### Use Other Languages If:
+- You have existing infrastructure in Go, Python, Java, etc.
+- You want to leverage language-specific ecosystems
+- Your team has expertise in a particular language
+
+## Getting Help
+
+If you encounter issues or have questions:
+
+- Check the [GitHub repository](https://github.com/rpcpool/yellowstone-grpc) for issues and discussions
+- Review the [protobuf definitions](https://github.com/rpcpool/yellowstone-grpc/tree/master/yellowstone-grpc-proto/proto) for API details
+- See the [examples directory](https://github.com/rpcpool/yellowstone-grpc/tree/master/examples) for working code
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Rust Client" href="/clients/rust">
+    Get started with the Rust client
+  </Card>
+  <Card title="TypeScript Client" href="/clients/typescript">
+    Get started with the TypeScript client
+  </Card>
+</CardGroup>

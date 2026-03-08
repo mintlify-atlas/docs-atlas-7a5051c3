@@ -1,0 +1,757 @@
+---
+title: "Unary Methods"
+description: "Request-response RPC methods for querying blockchain state and server information"
+---
+
+## Overview
+
+Yellowstone gRPC provides several unary (request-response) methods for querying current blockchain state without establishing a streaming connection. These methods are useful for one-time queries or health checks.
+
+## Ping
+
+Test server connectivity and measure round-trip latency.
+
+```proto
+rpc Ping(PingRequest) returns (PongResponse) {}
+```
+
+### Request
+
+<ParamField path="count" type="int32">
+  An arbitrary integer that will be echoed back in the response. Useful for matching requests to responses.
+</ParamField>
+
+### Response
+
+<ResponseField name="count" type="int32">
+  The same count value from the request.
+</ResponseField>
+
+### Examples
+
+<CodeGroup>
+
+```rust Rust
+use yellowstone_grpc_client::GeyserGrpcClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut client = GeyserGrpcClient::build_from_shared("http://127.0.0.1:10000")?
+        .x_token(Some("your-token-here"))?
+        .connect()
+        .await?;
+
+    let response = client.ping(42).await?;
+    println!("Pong: count={}", response.count);
+
+    Ok(())
+}
+```
+
+```typescript TypeScript
+import Client from "@triton-one/yellowstone-grpc";
+
+async function pingServer() {
+  const client = new Client("http://127.0.0.1:10000", "your-token-here");
+  await client.connect();
+
+  const response = await client.ping(42);
+  console.log("Pong:", response);
+}
+
+pingServer().catch(console.error);
+```
+
+```python Python
+import grpc
+import geyser_pb2
+import geyser_pb2_grpc
+
+channel = grpc.insecure_channel("127.0.0.1:10000")
+stub = geyser_pb2_grpc.GeyserStub(channel)
+
+request = geyser_pb2.PingRequest(count=42)
+response = stub.Ping(request)
+print(f"Pong: count={response.count}")
+```
+
+```go Go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    
+    pb "github.com/rpcpool/yellowstone-grpc/examples/golang/proto"
+    "google.golang.org/grpc"
+    "google.golang.org/grpc/credentials/insecure"
+)
+
+func main() {
+    conn, err := grpc.Dial("127.0.0.1:10000", grpc.WithTransportCredentials(insecure.NewCredentials()))
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer conn.Close()
+    
+    client := pb.NewGeyserClient(conn)
+    response, err := client.Ping(context.Background(), &pb.PingRequest{Count: 42})
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    fmt.Printf("Pong: count=%d\n", response.Count)
+}
+```
+
+</CodeGroup>
+
+---
+
+## GetLatestBlockhash
+
+Retrieve the latest blockhash and the last valid block height for transaction construction.
+
+```proto
+rpc GetLatestBlockhash(GetLatestBlockhashRequest) returns (GetLatestBlockhashResponse) {}
+```
+
+### Request
+
+<ParamField path="commitment" type="CommitmentLevel" optional>
+  Commitment level: PROCESSED (0), CONFIRMED (1), or FINALIZED (2). If not specified, defaults to FINALIZED.
+</ParamField>
+
+### Response
+
+<ResponseField name="slot" type="uint64">
+  Slot number where this blockhash was observed.
+</ResponseField>
+
+<ResponseField name="blockhash" type="string">
+  The latest blockhash (base58 encoded).
+</ResponseField>
+
+<ResponseField name="last_valid_block_height" type="uint64">
+  The last block height at which this blockhash will be valid for transaction inclusion.
+</ResponseField>
+
+### Examples
+
+<CodeGroup>
+
+```rust Rust
+use yellowstone_grpc_client::GeyserGrpcClient;
+use yellowstone_grpc_proto::prelude::CommitmentLevel;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut client = GeyserGrpcClient::build_from_shared("http://127.0.0.1:10000")?
+        .x_token(Some("your-token-here"))?
+        .connect()
+        .await?;
+
+    let response = client
+        .get_latest_blockhash(Some(CommitmentLevel::Finalized))
+        .await?;
+    
+    println!("Slot: {}", response.slot);
+    println!("Blockhash: {}", response.blockhash);
+    println!("Last valid block height: {}", response.last_valid_block_height);
+
+    Ok(())
+}
+```
+
+```typescript TypeScript
+import Client, { CommitmentLevel } from "@triton-one/yellowstone-grpc";
+
+async function getLatestBlockhash() {
+  const client = new Client("http://127.0.0.1:10000", "your-token-here");
+  await client.connect();
+
+  const response = await client.getLatestBlockhash(CommitmentLevel.FINALIZED);
+  console.log("Slot:", response.slot);
+  console.log("Blockhash:", response.blockhash);
+  console.log("Last valid block height:", response.lastValidBlockHeight);
+}
+
+getLatestBlockhash().catch(console.error);
+```
+
+```python Python
+import grpc
+import geyser_pb2
+import geyser_pb2_grpc
+
+channel = grpc.insecure_channel("127.0.0.1:10000")
+stub = geyser_pb2_grpc.GeyserStub(channel)
+
+request = geyser_pb2.GetLatestBlockhashRequest(
+    commitment=geyser_pb2.CommitmentLevel.FINALIZED
+)
+response = stub.GetLatestBlockhash(request)
+
+print(f"Slot: {response.slot}")
+print(f"Blockhash: {response.blockhash}")
+print(f"Last valid block height: {response.last_valid_block_height}")
+```
+
+```go Go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    
+    pb "github.com/rpcpool/yellowstone-grpc/examples/golang/proto"
+    "google.golang.org/grpc"
+    "google.golang.org/grpc/credentials/insecure"
+)
+
+func main() {
+    conn, err := grpc.Dial("127.0.0.1:10000", grpc.WithTransportCredentials(insecure.NewCredentials()))
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer conn.Close()
+    
+    client := pb.NewGeyserClient(conn)
+    commitment := pb.CommitmentLevel_FINALIZED
+    response, err := client.GetLatestBlockhash(context.Background(), &pb.GetLatestBlockhashRequest{
+        Commitment: &commitment,
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    fmt.Printf("Slot: %d\n", response.Slot)
+    fmt.Printf("Blockhash: %s\n", response.Blockhash)
+    fmt.Printf("Last valid block height: %d\n", response.LastValidBlockHeight)
+}
+```
+
+</CodeGroup>
+
+---
+
+## GetBlockHeight
+
+Retrieve the current block height.
+
+```proto
+rpc GetBlockHeight(GetBlockHeightRequest) returns (GetBlockHeightResponse) {}
+```
+
+### Request
+
+<ParamField path="commitment" type="CommitmentLevel" optional>
+  Commitment level: PROCESSED (0), CONFIRMED (1), or FINALIZED (2). If not specified, defaults to FINALIZED.
+</ParamField>
+
+### Response
+
+<ResponseField name="block_height" type="uint64">
+  The current block height.
+</ResponseField>
+
+### Examples
+
+<CodeGroup>
+
+```rust Rust
+use yellowstone_grpc_client::GeyserGrpcClient;
+use yellowstone_grpc_proto::prelude::CommitmentLevel;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut client = GeyserGrpcClient::build_from_shared("http://127.0.0.1:10000")?
+        .x_token(Some("your-token-here"))?
+        .connect()
+        .await?;
+
+    let response = client
+        .get_block_height(Some(CommitmentLevel::Confirmed))
+        .await?;
+    
+    println!("Block height: {}", response.block_height);
+
+    Ok(())
+}
+```
+
+```typescript TypeScript
+import Client, { CommitmentLevel } from "@triton-one/yellowstone-grpc";
+
+async function getBlockHeight() {
+  const client = new Client("http://127.0.0.1:10000", "your-token-here");
+  await client.connect();
+
+  const response = await client.getBlockHeight(CommitmentLevel.CONFIRMED);
+  console.log("Block height:", response.blockHeight);
+}
+
+getBlockHeight().catch(console.error);
+```
+
+```python Python
+import grpc
+import geyser_pb2
+import geyser_pb2_grpc
+
+channel = grpc.insecure_channel("127.0.0.1:10000")
+stub = geyser_pb2_grpc.GeyserStub(channel)
+
+request = geyser_pb2.GetBlockHeightRequest(
+    commitment=geyser_pb2.CommitmentLevel.CONFIRMED
+)
+response = stub.GetBlockHeight(request)
+
+print(f"Block height: {response.block_height}")
+```
+
+```go Go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    
+    pb "github.com/rpcpool/yellowstone-grpc/examples/golang/proto"
+    "google.golang.org/grpc"
+    "google.golang.org/grpc/credentials/insecure"
+)
+
+func main() {
+    conn, err := grpc.Dial("127.0.0.1:10000", grpc.WithTransportCredentials(insecure.NewCredentials()))
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer conn.Close()
+    
+    client := pb.NewGeyserClient(conn)
+    commitment := pb.CommitmentLevel_CONFIRMED
+    response, err := client.GetBlockHeight(context.Background(), &pb.GetBlockHeightRequest{
+        Commitment: &commitment,
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    fmt.Printf("Block height: %d\n", response.BlockHeight)
+}
+```
+
+</CodeGroup>
+
+---
+
+## GetSlot
+
+Retrieve the current slot number.
+
+```proto
+rpc GetSlot(GetSlotRequest) returns (GetSlotResponse) {}
+```
+
+### Request
+
+<ParamField path="commitment" type="CommitmentLevel" optional>
+  Commitment level: PROCESSED (0), CONFIRMED (1), or FINALIZED (2). If not specified, defaults to FINALIZED.
+</ParamField>
+
+### Response
+
+<ResponseField name="slot" type="uint64">
+  The current slot number.
+</ResponseField>
+
+### Examples
+
+<CodeGroup>
+
+```rust Rust
+use yellowstone_grpc_client::GeyserGrpcClient;
+use yellowstone_grpc_proto::prelude::CommitmentLevel;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut client = GeyserGrpcClient::build_from_shared("http://127.0.0.1:10000")?
+        .x_token(Some("your-token-here"))?
+        .connect()
+        .await?;
+
+    let response = client
+        .get_slot(Some(CommitmentLevel::Processed))
+        .await?;
+    
+    println!("Current slot: {}", response.slot);
+
+    Ok(())
+}
+```
+
+```typescript TypeScript
+import Client, { CommitmentLevel } from "@triton-one/yellowstone-grpc";
+
+async function getSlot() {
+  const client = new Client("http://127.0.0.1:10000", "your-token-here");
+  await client.connect();
+
+  const response = await client.getSlot(CommitmentLevel.PROCESSED);
+  console.log("Current slot:", response.slot);
+}
+
+getSlot().catch(console.error);
+```
+
+```python Python
+import grpc
+import geyser_pb2
+import geyser_pb2_grpc
+
+channel = grpc.insecure_channel("127.0.0.1:10000")
+stub = geyser_pb2_grpc.GeyserStub(channel)
+
+request = geyser_pb2.GetSlotRequest(
+    commitment=geyser_pb2.CommitmentLevel.PROCESSED
+)
+response = stub.GetSlot(request)
+
+print(f"Current slot: {response.slot}")
+```
+
+```go Go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    
+    pb "github.com/rpcpool/yellowstone-grpc/examples/golang/proto"
+    "google.golang.org/grpc"
+    "google.golang.org/grpc/credentials/insecure"
+)
+
+func main() {
+    conn, err := grpc.Dial("127.0.0.1:10000", grpc.WithTransportCredentials(insecure.NewCredentials()))
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer conn.Close()
+    
+    client := pb.NewGeyserClient(conn)
+    commitment := pb.CommitmentLevel_PROCESSED
+    response, err := client.GetSlot(context.Background(), &pb.GetSlotRequest{
+        Commitment: &commitment,
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    fmt.Printf("Current slot: %d\n", response.Slot)
+}
+```
+
+</CodeGroup>
+
+---
+
+## IsBlockhashValid
+
+Check if a blockhash is still valid for transaction inclusion.
+
+```proto
+rpc IsBlockhashValid(IsBlockhashValidRequest) returns (IsBlockhashValidResponse) {}
+```
+
+### Request
+
+<ParamField path="blockhash" type="string" required>
+  The blockhash to validate (base58 encoded).
+</ParamField>
+
+<ParamField path="commitment" type="CommitmentLevel" optional>
+  Commitment level: PROCESSED (0), CONFIRMED (1), or FINALIZED (2). If not specified, defaults to FINALIZED.
+</ParamField>
+
+### Response
+
+<ResponseField name="slot" type="uint64">
+  The slot at which the validation was performed.
+</ResponseField>
+
+<ResponseField name="valid" type="bool">
+  Whether the blockhash is still valid for transaction inclusion.
+</ResponseField>
+
+### Examples
+
+<CodeGroup>
+
+```rust Rust
+use yellowstone_grpc_client::GeyserGrpcClient;
+use yellowstone_grpc_proto::prelude::CommitmentLevel;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut client = GeyserGrpcClient::build_from_shared("http://127.0.0.1:10000")?
+        .x_token(Some("your-token-here"))?
+        .connect()
+        .await?;
+
+    let blockhash = "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N".to_string();
+    let response = client
+        .is_blockhash_valid(blockhash, Some(CommitmentLevel::Finalized))
+        .await?;
+    
+    println!("Slot: {}", response.slot);
+    println!("Valid: {}", response.valid);
+
+    Ok(())
+}
+```
+
+```typescript TypeScript
+import Client, { CommitmentLevel } from "@triton-one/yellowstone-grpc";
+
+async function isBlockhashValid() {
+  const client = new Client("http://127.0.0.1:10000", "your-token-here");
+  await client.connect();
+
+  const blockhash = "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N";
+  const response = await client.isBlockhashValid(blockhash);
+  
+  console.log("Slot:", response.slot);
+  console.log("Valid:", response.valid);
+}
+
+isBlockhashValid().catch(console.error);
+```
+
+```python Python
+import grpc
+import geyser_pb2
+import geyser_pb2_grpc
+
+channel = grpc.insecure_channel("127.0.0.1:10000")
+stub = geyser_pb2_grpc.GeyserStub(channel)
+
+blockhash = "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N"
+request = geyser_pb2.IsBlockhashValidRequest(
+    blockhash=blockhash,
+    commitment=geyser_pb2.CommitmentLevel.FINALIZED
+)
+response = stub.IsBlockhashValid(request)
+
+print(f"Slot: {response.slot}")
+print(f"Valid: {response.valid}")
+```
+
+```go Go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    
+    pb "github.com/rpcpool/yellowstone-grpc/examples/golang/proto"
+    "google.golang.org/grpc"
+    "google.golang.org/grpc/credentials/insecure"
+)
+
+func main() {
+    conn, err := grpc.Dial("127.0.0.1:10000", grpc.WithTransportCredentials(insecure.NewCredentials()))
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer conn.Close()
+    
+    client := pb.NewGeyserClient(conn)
+    commitment := pb.CommitmentLevel_FINALIZED
+    blockhash := "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N"
+    
+    response, err := client.IsBlockhashValid(context.Background(), &pb.IsBlockhashValidRequest{
+        Blockhash:  blockhash,
+        Commitment: &commitment,
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    fmt.Printf("Slot: %d\n", response.Slot)
+    fmt.Printf("Valid: %v\n", response.Valid)
+}
+```
+
+</CodeGroup>
+
+---
+
+## GetVersion
+
+Retrieve the server version information.
+
+```proto
+rpc GetVersion(GetVersionRequest) returns (GetVersionResponse) {}
+```
+
+### Request
+
+Empty request (no parameters).
+
+### Response
+
+<ResponseField name="version" type="string">
+  The server version string.
+</ResponseField>
+
+### Examples
+
+<CodeGroup>
+
+```rust Rust
+use yellowstone_grpc_client::GeyserGrpcClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut client = GeyserGrpcClient::build_from_shared("http://127.0.0.1:10000")?
+        .x_token(Some("your-token-here"))?
+        .connect()
+        .await?;
+
+    let response = client.get_version().await?;
+    println!("Server version: {}", response.version);
+
+    Ok(())
+}
+```
+
+```typescript TypeScript
+import Client from "@triton-one/yellowstone-grpc";
+
+async function getVersion() {
+  const client = new Client("http://127.0.0.1:10000", "your-token-here");
+  await client.connect();
+
+  const response = await client.getVersion();
+  console.log("Server version:", response);
+}
+
+getVersion().catch(console.error);
+```
+
+```python Python
+import grpc
+import geyser_pb2
+import geyser_pb2_grpc
+
+channel = grpc.insecure_channel("127.0.0.1:10000")
+stub = geyser_pb2_grpc.GeyserStub(channel)
+
+request = geyser_pb2.GetVersionRequest()
+response = stub.GetVersion(request)
+
+print(f"Server version: {response.version}")
+```
+
+```go Go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    
+    pb "github.com/rpcpool/yellowstone-grpc/examples/golang/proto"
+    "google.golang.org/grpc"
+    "google.golang.org/grpc/credentials/insecure"
+)
+
+func main() {
+    conn, err := grpc.Dial("127.0.0.1:10000", grpc.WithTransportCredentials(insecure.NewCredentials()))
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer conn.Close()
+    
+    client := pb.NewGeyserClient(conn)
+    response, err := client.GetVersion(context.Background(), &pb.GetVersionRequest{})
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    fmt.Printf("Server version: %s\n", response.Version)
+}
+```
+
+</CodeGroup>
+
+---
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="Health Checks" icon="heart-pulse">
+    Use `Ping` and `GetVersion` to verify server connectivity and compatibility.
+  </Card>
+  <Card title="Transaction Construction" icon="file-code">
+    Use `GetLatestBlockhash` to get a recent blockhash for building transactions.
+  </Card>
+  <Card title="Blockchain Progress" icon="chart-line">
+    Use `GetSlot` and `GetBlockHeight` to monitor blockchain progress and sync status.
+  </Card>
+  <Card title="Transaction Validation" icon="check-circle">
+    Use `IsBlockhashValid` to check if a transaction can still be submitted.
+  </Card>
+</CardGroup>
+
+## Commitment Levels
+
+Most methods accept an optional commitment level parameter:
+
+- **PROCESSED (0)**: Latest processed slot (may be rolled back)
+- **CONFIRMED (1)**: Slot confirmed by supermajority of the cluster (low rollback risk)
+- **FINALIZED (2)**: Slot finalized by the cluster (no rollback risk)
+
+Choose based on your application's tolerance for reorgs:
+
+```rust
+// Use PROCESSED for real-time data (highest risk of rollback)
+let slot = client.get_slot(Some(CommitmentLevel::Processed)).await?;
+
+// Use CONFIRMED for most applications (balanced)
+let slot = client.get_slot(Some(CommitmentLevel::Confirmed)).await?;
+
+// Use FINALIZED for critical operations (no rollback)
+let slot = client.get_slot(Some(CommitmentLevel::Finalized)).await?;
+```
+
+## Error Handling
+
+All methods return standard gRPC status codes:
+
+- `OK (0)`: Request succeeded
+- `UNAVAILABLE (14)`: Server is temporarily unavailable
+- `UNAUTHENTICATED (16)`: Invalid or missing authentication token
+- `DEADLINE_EXCEEDED (4)`: Request timeout
+
+```rust
+match client.get_slot(Some(CommitmentLevel::Finalized)).await {
+    Ok(response) => println!("Slot: {}", response.slot),
+    Err(e) => eprintln!("Error: {:?}", e),
+}
+```
+
+## Best Practices
+
+- **Cache responses**: Don't query every millisecond; cache results for a reasonable duration
+- **Handle timeouts**: Set appropriate timeouts based on your use case
+- **Use appropriate commitment**: Choose commitment level based on your tolerance for reorgs
+- **Health checks**: Implement periodic `Ping` calls to detect connection issues early
+- **Version compatibility**: Check `GetVersion` on startup to ensure compatibility

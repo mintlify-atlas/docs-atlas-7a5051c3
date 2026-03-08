@@ -1,0 +1,383 @@
+---
+title: 'Subscribing to Updates'
+description: 'Learn how to subscribe to accounts, transactions, blocks, and slots using Yellowstone gRPC'
+---
+
+## Overview
+
+Yellowstone gRPC provides real-time streaming of Solana blockchain data through the `Subscribe` RPC method. You can subscribe to multiple types of updates simultaneously:
+
+- **Accounts** - Get notified when account data changes
+- **Transactions** - Stream transaction updates as they occur
+- **Blocks** - Receive complete block information
+- **Slots** - Track slot progression and status changes
+- **Entries** - Monitor entry creation
+- **Block Meta** - Get block metadata without full transaction data
+
+## Basic Subscribe Request
+
+The subscribe request uses a bidirectional streaming RPC. You send `SubscribeRequest` messages and receive `SubscribeUpdate` responses.
+
+```protobuf
+message SubscribeRequest {
+  map<string, SubscribeRequestFilterAccounts> accounts = 1;
+  map<string, SubscribeRequestFilterSlots> slots = 2;
+  map<string, SubscribeRequestFilterTransactions> transactions = 3;
+  map<string, SubscribeRequestFilterTransactions> transactions_status = 10;
+  map<string, SubscribeRequestFilterBlocks> blocks = 4;
+  map<string, SubscribeRequestFilterBlocksMeta> blocks_meta = 5;
+  map<string, SubscribeRequestFilterEntry> entry = 8;
+  optional CommitmentLevel commitment = 6;
+  repeated SubscribeRequestAccountsDataSlice accounts_data_slice = 7;
+  optional SubscribeRequestPing ping = 9;
+  optional uint64 from_slot = 11;
+}
+```
+
+## Subscribing to Different Update Types
+
+<Tabs>
+  <Tab title="Accounts">
+    Subscribe to account updates by specifying account filters.
+
+    ```rust
+    use yellowstone_grpc_proto::prelude::{
+        SubscribeRequest,
+        SubscribeRequestFilterAccounts,
+        CommitmentLevel,
+    };
+    use std::collections::HashMap;
+
+    let mut accounts = HashMap::new();
+    accounts.insert(
+        "client".to_owned(),
+        SubscribeRequestFilterAccounts {
+            account: vec!["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()],
+            owner: vec![],
+            filters: vec![],
+            nonempty_txn_signature: None,
+        },
+    );
+
+    let request = SubscribeRequest {
+        accounts,
+        commitment: Some(CommitmentLevel::Confirmed as i32),
+        ..Default::default()
+    };
+    ```
+
+    **TypeScript Example:**
+
+    ```typescript
+    import Client, { CommitmentLevel } from "@triton-one/yellowstone-grpc";
+
+    const client = new Client(endpoint, token);
+    await client.connect();
+
+    const stream = await client.subscribe();
+
+    const request = {
+      accounts: {
+        client: {
+          account: ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+          owner: [],
+          filters: [],
+        },
+      },
+      commitment: CommitmentLevel.CONFIRMED,
+    };
+
+    stream.write(request);
+    ```
+  </Tab>
+
+  <Tab title="Transactions">
+    Subscribe to transaction updates with filtering options.
+
+    ```rust
+    use yellowstone_grpc_proto::prelude::{
+        SubscribeRequest,
+        SubscribeRequestFilterTransactions,
+    };
+    use std::collections::HashMap;
+
+    let mut transactions = HashMap::new();
+    transactions.insert(
+        "client".to_string(),
+        SubscribeRequestFilterTransactions {
+            vote: Some(false), // Exclude vote transactions
+            failed: Some(false), // Exclude failed transactions
+            signature: None,
+            account_include: vec![
+                "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()
+            ],
+            account_exclude: vec![],
+            account_required: vec![],
+        },
+    );
+
+    let request = SubscribeRequest {
+        transactions,
+        ..Default::default()
+    };
+    ```
+
+    **TypeScript Example:**
+
+    ```typescript
+    const request = {
+      transactions: {
+        client: {
+          vote: false,
+          failed: false,
+          accountInclude: ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+          accountExclude: [],
+          accountRequired: [],
+        },
+      },
+    };
+
+    stream.write(request);
+    ```
+  </Tab>
+
+  <Tab title="Blocks">
+    Subscribe to complete block updates including transactions, accounts, and entries.
+
+    ```rust
+    use yellowstone_grpc_proto::prelude::{
+        SubscribeRequest,
+        SubscribeRequestFilterBlocks,
+    };
+    use std::collections::HashMap;
+
+    let mut blocks = HashMap::new();
+    blocks.insert(
+        "client".to_owned(),
+        SubscribeRequestFilterBlocks {
+            account_include: vec![],
+            include_transactions: Some(true),
+            include_accounts: Some(true),
+            include_entries: Some(false),
+        },
+    );
+
+    let request = SubscribeRequest {
+        blocks,
+        commitment: Some(CommitmentLevel::Confirmed as i32),
+        ..Default::default()
+    };
+    ```
+
+    **TypeScript Example:**
+
+    ```typescript
+    const request = {
+      blocks: {
+        client: {
+          accountInclude: [],
+          includeTransactions: true,
+          includeAccounts: true,
+          includeEntries: false,
+        },
+      },
+      commitment: CommitmentLevel.CONFIRMED,
+    };
+
+    stream.write(request);
+    ```
+  </Tab>
+
+  <Tab title="Slots">
+    Subscribe to slot status updates to track chain progression.
+
+    ```rust
+    use yellowstone_grpc_proto::prelude::{
+        SubscribeRequest,
+        SubscribeRequestFilterSlots,
+        CommitmentLevel,
+    };
+    use std::collections::HashMap;
+
+    let mut slots = HashMap::new();
+    slots.insert(
+        "client".to_owned(),
+        SubscribeRequestFilterSlots {
+            filter_by_commitment: Some(true),
+            interslot_updates: Some(false),
+        },
+    );
+
+    let request = SubscribeRequest {
+        slots,
+        commitment: Some(CommitmentLevel::Processed as i32),
+        ..Default::default()
+    };
+    ```
+
+    **TypeScript Example:**
+
+    ```typescript
+    const request = {
+      slots: {
+        client: {
+          filterByCommitment: true,
+          interslotUpdates: false,
+        },
+      },
+      commitment: CommitmentLevel.PROCESSED,
+    };
+
+    stream.write(request);
+    ```
+
+    **Slot Status Types:**
+
+    ```protobuf
+    enum SlotStatus {
+      SLOT_PROCESSED = 0;
+      SLOT_CONFIRMED = 1;
+      SLOT_FINALIZED = 2;
+      SLOT_FIRST_SHRED_RECEIVED = 3;
+      SLOT_COMPLETED = 4;
+      SLOT_CREATED_BANK = 5;
+      SLOT_DEAD = 6;
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Handling Updates
+
+When you receive updates, they arrive as a stream of `SubscribeUpdate` messages:
+
+```rust
+while let Some(message) = stream.next().await {
+    match message {
+        Ok(msg) => {
+            match msg.update_oneof {
+                Some(UpdateOneof::Account(account_update)) => {
+                    println!("Account update: slot {}", account_update.slot);
+                }
+                Some(UpdateOneof::Transaction(tx_update)) => {
+                    println!("Transaction update: slot {}", tx_update.slot);
+                }
+                Some(UpdateOneof::Block(block_update)) => {
+                    println!("Block update: slot {}", block_update.slot);
+                }
+                Some(UpdateOneof::Slot(slot_update)) => {
+                    println!("Slot update: {} - {:?}", slot_update.slot, slot_update.status);
+                }
+                _ => {}
+            }
+        }
+        Err(error) => {
+            eprintln!("Stream error: {:?}", error);
+            break;
+        }
+    }
+}
+```
+
+## Multiple Subscriptions
+
+You can subscribe to multiple update types in a single request by specifying multiple filters:
+
+```rust
+let request = SubscribeRequest {
+    accounts,
+    slots,
+    transactions,
+    blocks,
+    commitment: Some(CommitmentLevel::Confirmed as i32),
+    ..Default::default()
+};
+```
+
+## Filter Names
+
+Each filter map uses a string key (like `"client"` in the examples). This allows you to:
+
+- Create multiple named filters of the same type
+- Identify which filter matched in the response via the `filters` field
+- Update or remove specific filters dynamically
+
+## Starting from a Specific Slot
+
+You can replay updates from a specific slot using the `from_slot` field:
+
+```rust
+let request = SubscribeRequest {
+    accounts,
+    from_slot: Some(250_000_000),
+    ..Default::default()
+};
+```
+
+<Note>
+The `from_slot` feature depends on the server's available slot history. Check the server's `first_available` slot using the `SubscribeReplayInfo` RPC.
+</Note>
+
+## Best Practices
+
+1. **Use specific filters** - Don't subscribe to all updates if you only need specific data
+2. **Set appropriate commitment levels** - Use `processed` for speed, `confirmed` for safety, `finalized` for certainty
+3. **Handle errors gracefully** - Implement reconnection logic for network interruptions
+4. **Monitor filter matches** - Check the `filters` field in updates to know which filter matched
+5. **Keep connections alive** - Use the ping/pong mechanism (see [Ping/Pong guide](/guides/ping-pong))
+
+## Common Use Cases
+
+<AccordionGroup>
+  <Accordion title="Monitor specific token accounts">
+    ```rust
+    let mut accounts = HashMap::new();
+    accounts.insert(
+        "token-accounts".to_owned(),
+        SubscribeRequestFilterAccounts {
+            account: vec![],
+            owner: vec!["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()],
+            filters: vec![],
+            nonempty_txn_signature: None,
+        },
+    );
+    ```
+  </Accordion>
+
+  <Accordion title="Track transactions for a specific program">
+    ```rust
+    let mut transactions = HashMap::new();
+    transactions.insert(
+        "program-txs".to_string(),
+        SubscribeRequestFilterTransactions {
+            vote: Some(false),
+            failed: None, // Include both successful and failed
+            signature: None,
+            account_include: vec!["YourProgramId111111111111111111111111111111".to_string()],
+            account_exclude: vec![],
+            account_required: vec![],
+        },
+    );
+    ```
+  </Accordion>
+
+  <Accordion title="Monitor chain progression">
+    ```rust
+    let mut slots = HashMap::new();
+    slots.insert(
+        "chain-monitor".to_owned(),
+        SubscribeRequestFilterSlots {
+            filter_by_commitment: Some(false), // Get all slot updates
+            interslot_updates: Some(true), // Include intermediate updates
+        },
+    );
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+- Learn about [Filtering](/guides/filtering) to narrow down updates
+- Use [Data Slicing](/guides/data-slicing) to reduce bandwidth
+- Understand [Commitment Levels](/guides/commitment-levels) for your use case
+- Implement [Ping/Pong](/guides/ping-pong) to keep connections alive

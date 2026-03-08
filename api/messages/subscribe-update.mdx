@@ -1,0 +1,252 @@
+---
+title: "SubscribeUpdate"
+description: "Response message containing streamed updates from Geyser"
+---
+
+## Overview
+
+The `SubscribeUpdate` message is the response type returned by the Subscribe RPC method. It contains updates for accounts, transactions, blocks, slots, and other blockchain events based on your subscription filters.
+
+## Message Definition
+
+```protobuf
+message SubscribeUpdate {
+  repeated string filters = 1;
+  oneof update_oneof {
+    SubscribeUpdateAccount account = 2;
+    SubscribeUpdateSlot slot = 3;
+    SubscribeUpdateTransaction transaction = 4;
+    SubscribeUpdateTransactionStatus transaction_status = 10;
+    SubscribeUpdateBlock block = 5;
+    SubscribeUpdatePing ping = 6;
+    SubscribeUpdatePong pong = 9;
+    SubscribeUpdateBlockMeta block_meta = 7;
+    SubscribeUpdateEntry entry = 8;
+  }
+  google.protobuf.Timestamp created_at = 11;
+}
+```
+
+## Fields
+
+<ResponseField name="filters" type="repeated string" required>
+  Array of filter names that matched this update. These correspond to the filter names you defined in your `SubscribeRequest`. Useful for determining which of your filters triggered this update.
+</ResponseField>
+
+<ResponseField name="update_oneof" type="oneof" required>
+  The actual update data. Only one of these fields will be set in each message, depending on the type of update:
+  
+  <Expandable title="Update types">
+    - `account` - Account update ([SubscribeUpdateAccount](/api/messages/account#subscribeupdateaccount))
+    - `slot` - Slot update ([SubscribeUpdateSlot](/api/messages/slot#subscribeupdateslot))
+    - `transaction` - Transaction update ([SubscribeUpdateTransaction](/api/messages/transaction#subscribeupdatetransaction))
+    - `transaction_status` - Early transaction status update ([SubscribeUpdateTransactionStatus](/api/messages/transaction#subscribeupdatetransactionstatus))
+    - `block` - Block update ([SubscribeUpdateBlock](/api/messages/block#subscribeupdateblock))
+    - `ping` - Ping keepalive message
+    - `pong` - Pong response message
+    - `block_meta` - Block metadata update ([SubscribeUpdateBlockMeta](/api/messages/block#subscribeupdateblockmeta))
+    - `entry` - Entry update ([SubscribeUpdateEntry](/api/messages/block#subscribeupdateentry))
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="created_at" type="google.protobuf.Timestamp">
+  Timestamp when this update was created by the Geyser plugin. Useful for measuring latency and ordering events.
+</ResponseField>
+
+## Update Types
+
+### Account Update
+
+Sent when an account matching your filters is modified.
+
+```json
+{
+  "filters": ["my_account_filter"],
+  "account": {
+    "account": {
+      "pubkey": "7xLk17EQQ5KLDLDe44wCmupJKJjTGd8hs3eSVVhCx932",
+      "lamports": 1000000000,
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "executable": false,
+      "rent_epoch": 361,
+      "data": "...",
+      "write_version": 12345
+    },
+    "slot": 250000000,
+    "is_startup": false
+  },
+  "created_at": "2024-03-08T12:34:56.789Z"
+}
+```
+
+See [Account Messages](/api/messages/account) for detailed field documentation.
+
+### Slot Update
+
+Sent when a slot status changes (processed, confirmed, finalized, etc.).
+
+```json
+{
+  "filters": ["all_slots"],
+  "slot": {
+    "slot": 250000000,
+    "parent": 249999999,
+    "status": "SLOT_CONFIRMED"
+  },
+  "created_at": "2024-03-08T12:34:56.789Z"
+}
+```
+
+See [Slot Messages](/api/messages/slot) for detailed field documentation.
+
+### Transaction Update
+
+Sent when a transaction matching your filters is processed.
+
+```json
+{
+  "filters": ["non_vote_txs"],
+  "transaction": {
+    "transaction": {
+      "signature": "5j7s6NiJS3JAkvgkoc18WVAsiSaci2pxB2A6ueCJP4tprA2TFg9wSyTLeYouxPBJEMzJinENTkpA52YStRW5Dia7",
+      "is_vote": false,
+      "transaction": { },
+      "meta": { },
+      "index": 42
+    },
+    "slot": 250000000
+  },
+  "created_at": "2024-03-08T12:34:56.789Z"
+}
+```
+
+See [Transaction Messages](/api/messages/transaction) for detailed field documentation.
+
+### Transaction Status Update
+
+Sent immediately when a transaction is received, before full execution details are available.
+
+```json
+{
+  "filters": ["status_filter"],
+  "transaction_status": {
+    "slot": 250000000,
+    "signature": "5j7s6NiJS3JAkvgkoc18WVAsiSaci2pxB2A6ueCJP4tprA2TFg9wSyTLeYouxPBJEMzJinENTkpA52YStRW5Dia7",
+    "is_vote": false,
+    "index": 42
+  },
+  "created_at": "2024-03-08T12:34:56.789Z"
+}
+```
+
+See [Transaction Messages](/api/messages/transaction) for detailed field documentation.
+
+### Block Update
+
+Sent when a new block is produced.
+
+```json
+{
+  "filters": ["all_blocks"],
+  "block": {
+    "slot": 250000000,
+    "blockhash": "3Uxv5kZX8xJLtFUV4wQPjZBFJKMKBdJqKDJpqQnqJe3X",
+    "rewards": { },
+    "block_time": { "timestamp": 1709901234 },
+    "block_height": { "block_height": 235000000 },
+    "parent_slot": 249999999,
+    "parent_blockhash": "7hGzZJfFxqFqB9ZNdJN8f1NJHvZ8xJLtFUV4wQPjZBFJ",
+    "executed_transaction_count": 150,
+    "transactions": [],
+    "updated_account_count": 300,
+    "accounts": [],
+    "entries_count": 64,
+    "entries": []
+  },
+  "created_at": "2024-03-08T12:34:56.789Z"
+}
+```
+
+See [Block Messages](/api/messages/block) for detailed field documentation.
+
+### Block Meta Update
+
+Sent when a new block is produced, containing only metadata without full transaction/account data.
+
+```json
+{
+  "filters": ["meta_only"],
+  "block_meta": {
+    "slot": 250000000,
+    "blockhash": "3Uxv5kZX8xJLtFUV4wQPjZBFJKMKBdJqKDJpqQnqJe3X",
+    "rewards": { },
+    "block_time": { "timestamp": 1709901234 },
+    "block_height": { "block_height": 235000000 },
+    "parent_slot": 249999999,
+    "parent_blockhash": "7hGzZJfFxqFqB9ZNdJN8f1NJHvZ8xJLtFUV4wQPjZBFJ",
+    "executed_transaction_count": 150,
+    "entries_count": 64
+  },
+  "created_at": "2024-03-08T12:34:56.789Z"
+}
+```
+
+See [Block Messages](/api/messages/block) for detailed field documentation.
+
+### Ping/Pong Updates
+
+Keepalive messages to maintain the connection.
+
+```json
+// Ping (server to client)
+{
+  "filters": [],
+  "ping": {},
+  "created_at": "2024-03-08T12:34:56.789Z"
+}
+
+// Pong (server to client, in response to client ping)
+{
+  "filters": [],
+  "pong": {
+    "id": 1
+  },
+  "created_at": "2024-03-08T12:34:56.789Z"
+}
+```
+
+## Processing Updates
+
+When processing `SubscribeUpdate` messages:
+
+1. **Check the update type** - Use the `oneof` field to determine which type of update you received
+2. **Match filters** - Use the `filters` array to identify which of your subscription filters matched
+3. **Extract data** - Access the specific update message (account, transaction, block, etc.)
+4. **Track timing** - Use `created_at` to measure latency and order events
+
+## Example: Handling Updates
+
+```javascript
+for await (const update of stream) {
+  console.log('Matched filters:', update.filters);
+  console.log('Created at:', update.created_at);
+
+  if (update.account) {
+    console.log('Account update:', update.account.account.pubkey);
+  } else if (update.transaction) {
+    console.log('Transaction:', update.transaction.transaction.signature);
+  } else if (update.slot) {
+    console.log('Slot:', update.slot.slot, 'Status:', update.slot.status);
+  } else if (update.block) {
+    console.log('Block:', update.block.blockhash);
+  }
+}
+```
+
+## Related
+
+- [SubscribeRequest](/api/messages/subscribe-request) - Request message to initiate subscription
+- [Account Messages](/api/messages/account) - Account update details
+- [Transaction Messages](/api/messages/transaction) - Transaction update details
+- [Block Messages](/api/messages/block) - Block and entry update details
+- [Slot Messages](/api/messages/slot) - Slot update details

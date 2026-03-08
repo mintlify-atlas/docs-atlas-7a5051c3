@@ -1,0 +1,419 @@
+---
+title: 'Commitment Levels'
+description: 'Understanding processed, confirmed, and finalized commitment levels in Yellowstone gRPC'
+---
+
+## Overview
+
+Commitment levels in Solana represent different stages of transaction and block confirmation. Yellowstone gRPC allows you to specify which commitment level you want to receive updates for, letting you choose between speed and certainty.
+
+## Commitment Levels
+
+Yellowstone gRPC supports three commitment levels defined in the protocol:
+
+```protobuf
+enum CommitmentLevel {
+  PROCESSED = 0;
+  CONFIRMED = 1;
+  FINALIZED = 2;
+}
+```
+
+<CardGroup cols={3}>
+  <Card title="Processed" icon="bolt">
+    **Fastest, Least Certain**
+    
+    The transaction has been processed by a validator and added to a block, but the block may not be confirmed or finalized. This is the fastest way to see updates but carries the highest risk of reorgs.
+    
+    **Use when:** You need real-time updates and can handle potential rollbacks
+  </Card>
+  
+  <Card title="Confirmed" icon="check">
+    **Balanced Speed & Safety**
+    
+    The block containing the transaction has been confirmed by the cluster (66%+ stake agreement). This is the recommended level for most applications.
+    
+    **Use when:** You need reliable updates without waiting for full finality
+  </Card>
+  
+  <Card title="Finalized" icon="lock">
+    **Slowest, Most Certain**
+    
+    The block has been finalized by the cluster and is extremely unlikely to be rolled back. This provides the highest level of certainty.
+    
+    **Use when:** You need absolute certainty and can tolerate delays
+  </Card>
+</CardGroup>
+
+## Setting Commitment Level
+
+<Tabs>
+  <Tab title="Rust">
+    ```rust
+    use yellowstone_grpc_proto::prelude::{
+        SubscribeRequest,
+        SubscribeRequestFilterAccounts,
+        CommitmentLevel,
+    };
+    use std::collections::HashMap;
+
+    let mut accounts = HashMap::new();
+    accounts.insert(
+        "client".to_owned(),
+        SubscribeRequestFilterAccounts {
+            account: vec!["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()],
+            owner: vec![],
+            filters: vec![],
+            nonempty_txn_signature: None,
+        },
+    );
+
+    // Use confirmed commitment level
+    let request = SubscribeRequest {
+        accounts,
+        commitment: Some(CommitmentLevel::Confirmed as i32),
+        ..Default::default()
+    };
+    ```
+  </Tab>
+
+  <Tab title="TypeScript">
+    ```typescript
+    import Client, { CommitmentLevel } from "@triton-one/yellowstone-grpc";
+
+    const client = new Client(endpoint, token);
+    await client.connect();
+
+    const stream = await client.subscribe();
+
+    const request = {
+      accounts: {
+        client: {
+          account: ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+          owner: [],
+          filters: [],
+        },
+      },
+      commitment: CommitmentLevel.CONFIRMED,
+    };
+
+    stream.write(request);
+    ```
+  </Tab>
+
+  <Tab title="Command Line">
+    ```bash
+    # Processed (default)
+    cargo run --bin client -- \
+      --endpoint http://127.0.0.1:10000 \
+      --commitment processed \
+      subscribe --accounts
+
+    # Confirmed (recommended)
+    cargo run --bin client -- \
+      --endpoint http://127.0.0.1:10000 \
+      --commitment confirmed \
+      subscribe --accounts
+
+    # Finalized
+    cargo run --bin client -- \
+      --endpoint http://127.0.0.1:10000 \
+      --commitment finalized \
+      subscribe --accounts
+    ```
+  </Tab>
+</Tabs>
+
+## Commitment Level Behavior
+
+The commitment level affects all subscription types in your request:
+
+- **Accounts** - Updates are sent when the account is modified at the specified commitment level
+- **Transactions** - Transactions are sent when they reach the specified commitment level
+- **Blocks** - Blocks are sent when they reach the specified commitment level
+- **Slots** - Slots can be filtered by commitment level using `filter_by_commitment`
+
+## Slot Commitment Filtering
+
+Slots are special because they progress through multiple commitment levels. You can control whether you want all slot updates or only updates at your specified commitment level:
+
+```rust
+use yellowstone_grpc_proto::prelude::{
+    SubscribeRequest,
+    SubscribeRequestFilterSlots,
+    CommitmentLevel,
+};
+use std::collections::HashMap;
+
+let mut slots = HashMap::new();
+slots.insert(
+    "client".to_owned(),
+    SubscribeRequestFilterSlots {
+        // Only receive slots at the confirmed level
+        filter_by_commitment: Some(true),
+        interslot_updates: Some(false),
+    },
+);
+
+let request = SubscribeRequest {
+    slots,
+    commitment: Some(CommitmentLevel::Confirmed as i32),
+    ..Default::default()
+};
+```
+
+**With `filter_by_commitment: true`:**
+- You only receive slot updates when they reach your specified commitment level
+- Example: With `confirmed` commitment, you only get slots when they're confirmed
+
+**With `filter_by_commitment: false` (or `None`):**
+- You receive slot updates at all commitment levels
+- You'll see slots progress from processed → confirmed → finalized
+
+## Slot Status vs Commitment Level
+
+Slot updates include a `status` field that indicates the slot's current state:
+
+```protobuf
+enum SlotStatus {
+  SLOT_PROCESSED = 0;
+  SLOT_CONFIRMED = 1;
+  SLOT_FINALIZED = 2;
+  SLOT_FIRST_SHRED_RECEIVED = 3;
+  SLOT_COMPLETED = 4;
+  SLOT_CREATED_BANK = 5;
+  SLOT_DEAD = 6;
+}
+```
+
+Example of processing slot updates:
+
+```rust
+use yellowstone_grpc_proto::geyser::SlotStatus;
+use yellowstone_grpc_proto::prelude::{
+    subscribe_update::UpdateOneof,
+};
+
+while let Some(message) = stream.next().await {
+    match message?.update_oneof {
+        Some(UpdateOneof::Slot(slot_update)) => {
+            let status = SlotStatus::try_from(slot_update.status)
+                .unwrap_or(SlotStatus::SlotProcessed);
+            
+            match status {
+                SlotStatus::SlotProcessed => {
+                    println!("Slot {} processed", slot_update.slot);
+                }
+                SlotStatus::SlotConfirmed => {
+                    println!("Slot {} confirmed", slot_update.slot);
+                }
+                SlotStatus::SlotFinalized => {
+                    println!("Slot {} finalized", slot_update.slot);
+                }
+                SlotStatus::SlotDead => {
+                    println!("Slot {} died: {:?}", slot_update.slot, slot_update.dead_error);
+                }
+                _ => {
+                    println!("Slot {} - status: {:?}", slot_update.slot, status);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+```
+
+## Timing Expectations
+
+Typical timing for commitment levels on Solana:
+
+| Commitment Level | Approximate Time | Reorg Risk |
+|-----------------|------------------|------------|
+| Processed | ~400-600ms | High - blocks may be orphaned |
+| Confirmed | ~1-2 seconds | Low - requires 66%+ stake to reorg |
+| Finalized | ~12-32 seconds | Very Low - requires 66%+ stake over 31+ slots |
+
+<Note>
+These times are approximate and depend on network conditions. Mainnet-beta typically has faster confirmation times than testnet.
+</Note>
+
+## Use Cases by Commitment Level
+
+<Tabs>
+  <Tab title="Processed">
+    **Best for:**
+    - Real-time price feeds
+    - UI updates that can be corrected
+    - Activity monitoring dashboards
+    - Early detection of events
+
+    **Example: Real-time DEX price monitoring**
+    ```rust
+    let request = SubscribeRequest {
+        accounts,
+        commitment: Some(CommitmentLevel::Processed as i32),
+        ..Default::default()
+    };
+    // Process updates immediately but be prepared for rollbacks
+    ```
+
+    **Not recommended for:**
+    - Financial transactions
+    - Permanent state changes
+    - Critical business logic
+  </Tab>
+
+  <Tab title="Confirmed">
+    **Best for:**
+    - Most production applications
+    - Trading bots
+    - Transaction monitoring
+    - Account balance tracking
+    - Event processing
+
+    **Example: Token transfer monitoring**
+    ```rust
+    let request = SubscribeRequest {
+        transactions,
+        commitment: Some(CommitmentLevel::Confirmed as i32),
+        ..Default::default()
+    };
+    // Safe to act on these updates in most cases
+    ```
+
+    **This is the recommended default** for most applications as it provides a good balance between speed and safety.
+  </Tab>
+
+  <Tab title="Finalized">
+    **Best for:**
+    - Financial settlement
+    - Audit trails
+    - Critical state changes
+    - Cross-chain bridges
+    - Compliance requirements
+
+    **Example: Settlement system**
+    ```rust
+    let request = SubscribeRequest {
+        transactions,
+        commitment: Some(CommitmentLevel::Finalized as i32),
+        ..Default::default()
+    };
+    // Extremely safe - can be considered permanent
+    ```
+
+    **Trade-off:** Higher latency (10-30 seconds) but maximum certainty.
+  </Tab>
+</Tabs>
+
+## Monitoring All Commitment Levels
+
+You can create multiple subscriptions with different commitment levels if you need to track progression:
+
+```rust
+use futures::stream::StreamExt;
+
+// Open the stream
+let (mut subscribe_tx, mut stream) = client.subscribe().await?;
+
+// Send requests for different commitment levels
+subscribe_tx.send(SubscribeRequest {
+    accounts: accounts.clone(),
+    commitment: Some(CommitmentLevel::Processed as i32),
+    ..Default::default()
+}).await?;
+
+subscribe_tx.send(SubscribeRequest {
+    accounts: accounts.clone(),
+    commitment: Some(CommitmentLevel::Confirmed as i32),
+    ..Default::default()
+}).await?;
+
+// Process updates from all commitment levels
+while let Some(message) = stream.next().await {
+    // Handle updates...
+}
+```
+
+## Commitment Level with Other Features
+
+### Commitment + Data Slicing
+
+```rust
+let request = SubscribeRequest {
+    accounts,
+    accounts_data_slice: vec![
+        SubscribeRequestAccountsDataSlice {
+            offset: 0,
+            length: 32,
+        },
+    ],
+    commitment: Some(CommitmentLevel::Confirmed as i32),
+    ..Default::default()
+};
+```
+
+### Commitment + Filters
+
+```rust
+let request = SubscribeRequest {
+    transactions,
+    commitment: Some(CommitmentLevel::Confirmed as i32),
+    ..Default::default()
+};
+// Transaction filters are applied at the confirmed level
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Confirmed by Default" icon="shield-check">
+    Unless you have specific requirements, use `confirmed` commitment for the best balance of speed and safety.
+  </Card>
+  
+  <Card title="Match Your Use Case" icon="bullseye">
+    Choose processed for real-time UIs, confirmed for most apps, finalized for critical operations.
+  </Card>
+  
+  <Card title="Handle Reorgs" icon="rotate">
+    If using processed commitment, implement logic to handle potential rollbacks.
+  </Card>
+  
+  <Card title="Consider Latency" icon="clock">
+    Higher commitment levels = more certainty but also more latency. Plan accordingly.
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Why am I not receiving updates?">
+    - Check that your commitment level matches the activity you're monitoring
+    - Verify that the accounts/transactions you're filtering for are active at that commitment level
+    - Try lowering to `processed` to see if updates appear faster
+  </Accordion>
+
+  <Accordion title="Updates seem delayed">
+    - This is expected with higher commitment levels
+    - `finalized` can take 12-32 seconds
+    - Consider using `confirmed` if the delay is too long
+  </Accordion>
+
+  <Accordion title="I'm seeing duplicate updates">
+    - This can happen if you're not using `filter_by_commitment` with slots
+    - Or if you've subscribed multiple times with different filters
+    - Check the `filters` field in updates to identify the source
+  </Accordion>
+
+  <Accordion title="Processed updates keep changing">
+    - This is normal - processed blocks can be orphaned
+    - Use `confirmed` or `finalized` if you need stable data
+    - Implement rollback logic if you must use processed
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+- Learn about [Subscribing](/guides/subscribing) to different update types
+- Explore [Filtering](/guides/filtering) to narrow down updates
+- Implement [Ping/Pong](/guides/ping-pong) to keep your connection alive

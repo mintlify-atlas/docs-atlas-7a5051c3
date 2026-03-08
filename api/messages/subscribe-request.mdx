@@ -1,0 +1,198 @@
+---
+title: "SubscribeRequest"
+description: "Primary request message for subscribing to Geyser updates"
+---
+
+## Overview
+
+The `SubscribeRequest` message is used to initiate a subscription to the Yellowstone gRPC stream. It allows you to define multiple filters for different types of updates (accounts, transactions, blocks, slots) and specify subscription parameters.
+
+## Message Definition
+
+```protobuf
+message SubscribeRequest {
+  map<string, SubscribeRequestFilterAccounts> accounts = 1;
+  map<string, SubscribeRequestFilterSlots> slots = 2;
+  map<string, SubscribeRequestFilterTransactions> transactions = 3;
+  map<string, SubscribeRequestFilterTransactions> transactions_status = 10;
+  map<string, SubscribeRequestFilterBlocks> blocks = 4;
+  map<string, SubscribeRequestFilterBlocksMeta> blocks_meta = 5;
+  map<string, SubscribeRequestFilterEntry> entry = 8;
+  optional CommitmentLevel commitment = 6;
+  repeated SubscribeRequestAccountsDataSlice accounts_data_slice = 7;
+  optional SubscribeRequestPing ping = 9;
+  optional uint64 from_slot = 11;
+}
+```
+
+## Fields
+
+<ParamField path="accounts" type="map<string, SubscribeRequestFilterAccounts>">
+  Map of named account filters. The key is a user-defined filter name, and the value specifies the account filter criteria. See [Filter Messages](/api/messages/filters#account-filters) for details.
+</ParamField>
+
+<ParamField path="slots" type="map<string, SubscribeRequestFilterSlots>">
+  Map of named slot filters. The key is a user-defined filter name, and the value specifies the slot filter criteria. See [Filter Messages](/api/messages/filters#slot-filters) for details.
+</ParamField>
+
+<ParamField path="transactions" type="map<string, SubscribeRequestFilterTransactions>">
+  Map of named transaction filters for confirmed/finalized transactions. The key is a user-defined filter name, and the value specifies the transaction filter criteria. See [Filter Messages](/api/messages/filters#transaction-filters) for details.
+</ParamField>
+
+<ParamField path="transactions_status" type="map<string, SubscribeRequestFilterTransactions>">
+  Map of named transaction status filters for early transaction status updates. Uses the same filter type as `transactions` but provides updates as soon as the transaction is received, before full execution details are available.
+</ParamField>
+
+<ParamField path="blocks" type="map<string, SubscribeRequestFilterBlocks>">
+  Map of named block filters. The key is a user-defined filter name, and the value specifies the block filter criteria. See [Filter Messages](/api/messages/filters#block-filters) for details.
+</ParamField>
+
+<ParamField path="blocks_meta" type="map<string, SubscribeRequestFilterBlocksMeta>">
+  Map of named block metadata filters. Block meta updates contain only block metadata without full transaction or account data, reducing bandwidth. Currently accepts an empty filter object.
+</ParamField>
+
+<ParamField path="entry" type="map<string, SubscribeRequestFilterEntry>">
+  Map of named entry filters. Entries represent Proof of History entries. Currently accepts an empty filter object.
+</ParamField>
+
+<ParamField path="commitment" type="CommitmentLevel">
+  Optional commitment level for the subscription. Determines when updates are sent based on confirmation status.
+  
+  <Expandable title="CommitmentLevel values">
+    - `PROCESSED` (0): Updates sent as soon as the transaction/block is processed
+    - `CONFIRMED` (1): Updates sent after block is confirmed (default)
+    - `FINALIZED` (2): Updates sent only after block is finalized
+  </Expandable>
+</ParamField>
+
+<ParamField path="accounts_data_slice" type="repeated SubscribeRequestAccountsDataSlice">
+  Optional array of data slices to request only portions of account data, reducing bandwidth. Each slice specifies an offset and length.
+  
+  <Expandable title="SubscribeRequestAccountsDataSlice fields">
+    <ResponseField name="offset" type="uint64" required>
+      Byte offset from the start of the account data
+    </ResponseField>
+    <ResponseField name="length" type="uint64" required>
+      Number of bytes to include from the offset
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="ping" type="SubscribeRequestPing">
+  Optional ping configuration for keepalive messages.
+  
+  <Expandable title="SubscribeRequestPing fields">
+    <ResponseField name="id" type="int32" required>
+      Identifier for ping messages. The server will respond with pong messages containing this ID.
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="from_slot" type="uint64">
+  Optional starting slot number. If specified, the subscription will begin sending updates from this slot onwards. Useful for replaying historical data or resuming from a known slot.
+</ParamField>
+
+## Examples
+
+### Subscribe to All Accounts Owned by a Program
+
+```json
+{
+  "accounts": {
+    "token_accounts": {
+      "owner": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"]
+    }
+  },
+  "commitment": "CONFIRMED"
+}
+```
+
+### Subscribe to Specific Account Updates
+
+```json
+{
+  "accounts": {
+    "my_account": {
+      "account": ["7xLk17EQQ5KLDLDe44wCmupJKJjTGd8hs3eSVVhCx932"]
+    }
+  },
+  "accounts_data_slice": [
+    {
+      "offset": 0,
+      "length": 32
+    }
+  ]
+}
+```
+
+### Subscribe to Non-Vote Transactions
+
+```json
+{
+  "transactions": {
+    "non_vote": {
+      "vote": false,
+      "failed": false
+    }
+  },
+  "commitment": "FINALIZED"
+}
+```
+
+### Subscribe to Blocks and Slots
+
+```json
+{
+  "blocks": {
+    "all_blocks": {
+      "include_transactions": true,
+      "include_accounts": false
+    }
+  },
+  "slots": {
+    "all_slots": {}
+  }
+}
+```
+
+### Subscribe from a Specific Slot
+
+```json
+{
+  "transactions": {
+    "all": {}
+  },
+  "from_slot": 250000000,
+  "commitment": "CONFIRMED"
+}
+```
+
+### Multiple Filters with Ping
+
+```json
+{
+  "accounts": {
+    "raydium": {
+      "owner": ["675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"]
+    },
+    "serum": {
+      "owner": ["9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"]
+    }
+  },
+  "transactions": {
+    "all": {
+      "vote": false
+    }
+  },
+  "ping": {
+    "id": 1
+  },
+  "commitment": "CONFIRMED"
+}
+```
+
+## Related
+
+- [SubscribeUpdate](/api/messages/subscribe-update) - Response message containing updates
+- [Filter Messages](/api/messages/filters) - Detailed documentation for all filter types
+- [Subscribe Method](/api/methods/subscribe) - Main subscription RPC method

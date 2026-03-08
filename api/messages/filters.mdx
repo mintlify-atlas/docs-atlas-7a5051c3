@@ -1,0 +1,451 @@
+---
+title: "Filter Messages"
+description: "Filter message types for accounts, transactions, blocks, and slots"
+---
+
+## Overview
+
+Filters define which updates you want to receive from the Geyser stream. Each filter type allows you to specify criteria for matching accounts, transactions, blocks, or slots.
+
+## Account Filters
+
+### SubscribeRequestFilterAccounts
+
+Filters for account updates.
+
+```protobuf
+message SubscribeRequestFilterAccounts {
+  repeated string account = 2;
+  repeated string owner = 3;
+  repeated SubscribeRequestFilterAccountsFilter filters = 4;
+  optional bool nonempty_txn_signature = 5;
+}
+```
+
+<ParamField path="account" type="repeated string">
+  List of specific account public keys to subscribe to. If specified, you'll only receive updates for these exact accounts.
+</ParamField>
+
+<ParamField path="owner" type="repeated string">
+  List of program public keys. If specified, you'll receive updates for all accounts owned by these programs.
+</ParamField>
+
+<ParamField path="filters" type="repeated SubscribeRequestFilterAccountsFilter">
+  Additional filter criteria for accounts (memcmp, datasize, token account state, lamports). Multiple filters are combined with AND logic.
+</ParamField>
+
+<ParamField path="nonempty_txn_signature" type="bool">
+  If true, only include account updates that have an associated transaction signature. Useful for filtering out startup account loads.
+</ParamField>
+
+#### Example: Subscribe to Specific Accounts
+
+```json
+{
+  "account": [
+    "7xLk17EQQ5KLDLDe44wCmupJKJjTGd8hs3eSVVhCx932",
+    "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+  ]
+}
+```
+
+#### Example: Subscribe to All Token Program Accounts
+
+```json
+{
+  "owner": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"]
+}
+```
+
+### Account Filter Types
+
+#### SubscribeRequestFilterAccountsFilter
+
+```protobuf
+message SubscribeRequestFilterAccountsFilter {
+  oneof filter {
+    SubscribeRequestFilterAccountsFilterMemcmp memcmp = 1;
+    uint64 datasize = 2;
+    bool token_account_state = 3;
+    SubscribeRequestFilterAccountsFilterLamports lamports = 4;
+  }
+}
+```
+
+<ParamField path="memcmp" type="SubscribeRequestFilterAccountsFilterMemcmp">
+  Memory comparison filter. Matches accounts where specific bytes at an offset match the provided data.
+</ParamField>
+
+<ParamField path="datasize" type="uint64">
+  Data size filter. Matches accounts with exactly this many bytes of data.
+</ParamField>
+
+<ParamField path="token_account_state" type="bool">
+  Token account state filter. If true, matches valid SPL token accounts.
+</ParamField>
+
+<ParamField path="lamports" type="SubscribeRequestFilterAccountsFilterLamports">
+  Lamports filter. Matches accounts based on their lamport balance.
+</ParamField>
+
+#### SubscribeRequestFilterAccountsFilterMemcmp
+
+Memory comparison filter for matching specific bytes in account data.
+
+```protobuf
+message SubscribeRequestFilterAccountsFilterMemcmp {
+  uint64 offset = 1;
+  oneof data {
+    bytes bytes = 2;
+    string base58 = 3;
+    string base64 = 4;
+  }
+}
+```
+
+<ParamField path="offset" type="uint64" required>
+  Byte offset in the account data where the comparison should begin.
+</ParamField>
+
+<ParamField path="data" type="oneof" required>
+  Data to compare at the offset. Provide in one of three formats:
+  - `bytes` - Raw bytes
+  - `base58` - Base58-encoded string
+  - `base64` - Base64-encoded string
+</ParamField>
+
+##### Example: Memcmp Filter for Specific Mint
+
+```json
+{
+  "memcmp": {
+    "offset": 0,
+    "base58": "So11111111111111111111111111111111111111112"
+  }
+}
+```
+
+#### SubscribeRequestFilterAccountsFilterLamports
+
+Filter accounts based on lamport balance.
+
+```protobuf
+message SubscribeRequestFilterAccountsFilterLamports {
+  oneof cmp {
+    uint64 eq = 1;
+    uint64 ne = 2;
+    uint64 lt = 3;
+    uint64 gt = 4;
+  }
+}
+```
+
+<ParamField path="eq" type="uint64">
+  Equal to: matches accounts with exactly this many lamports.
+</ParamField>
+
+<ParamField path="ne" type="uint64">
+  Not equal to: matches accounts without exactly this many lamports.
+</ParamField>
+
+<ParamField path="lt" type="uint64">
+  Less than: matches accounts with fewer than this many lamports.
+</ParamField>
+
+<ParamField path="gt" type="uint64">
+  Greater than: matches accounts with more than this many lamports.
+</ParamField>
+
+##### Example: Filter by Lamport Balance
+
+```json
+{
+  "lamports": {
+    "gt": 1000000000
+  }
+}
+```
+
+#### Example: Combined Account Filters
+
+```json
+{
+  "owner": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+  "filters": [
+    {
+      "datasize": 165
+    },
+    {
+      "memcmp": {
+        "offset": 0,
+        "base58": "So11111111111111111111111111111111111111112"
+      }
+    }
+  ]
+}
+```
+
+## Transaction Filters
+
+### SubscribeRequestFilterTransactions
+
+Filters for transaction updates.
+
+```protobuf
+message SubscribeRequestFilterTransactions {
+  optional bool vote = 1;
+  optional bool failed = 2;
+  optional string signature = 5;
+  repeated string account_include = 3;
+  repeated string account_exclude = 4;
+  repeated string account_required = 6;
+}
+```
+
+<ParamField path="vote" type="bool">
+  Vote transaction filter:
+  - `true` - Only vote transactions
+  - `false` - Only non-vote transactions
+  - `null` (not set) - All transactions
+</ParamField>
+
+<ParamField path="failed" type="bool">
+  Failed transaction filter:
+  - `true` - Only failed transactions
+  - `false` - Only successful transactions
+  - `null` (not set) - All transactions
+</ParamField>
+
+<ParamField path="signature" type="string">
+  Subscribe to updates for a specific transaction signature.
+</ParamField>
+
+<ParamField path="account_include" type="repeated string">
+  List of account public keys. If specified, only transactions that read or write to at least one of these accounts will be included.
+</ParamField>
+
+<ParamField path="account_exclude" type="repeated string">
+  List of account public keys. If specified, transactions that read or write to any of these accounts will be excluded.
+</ParamField>
+
+<ParamField path="account_required" type="repeated string">
+  List of account public keys. If specified, only transactions that read or write to ALL of these accounts will be included. More restrictive than `account_include`.
+</ParamField>
+
+#### Example: Non-Vote Transactions Only
+
+```json
+{
+  "vote": false,
+  "failed": false
+}
+```
+
+#### Example: Transactions Involving Specific Accounts
+
+```json
+{
+  "account_include": [
+    "7xLk17EQQ5KLDLDe44wCmupJKJjTGd8hs3eSVVhCx932",
+    "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+  ],
+  "vote": false
+}
+```
+
+#### Example: Specific Transaction Signature
+
+```json
+{
+  "signature": "5j7s6NiJS3JAkvgkoc18WVAsiSaci2pxB2A6ueCJP4tprA2TFg9wSyTLeYouxPBJEMzJinENTkpA52YStRW5Dia7"
+}
+```
+
+### SubscribeRequestFilterDeshredTransactions
+
+Filters for deshred transactions (received before execution).
+
+```protobuf
+message SubscribeRequestFilterDeshredTransactions {
+  optional bool vote = 1;
+  repeated string account_include = 2;
+  repeated string account_exclude = 3;
+  repeated string account_required = 4;
+}
+```
+
+Similar to `SubscribeRequestFilterTransactions` but for pre-execution transactions. Does not include `failed` or `signature` filters since execution hasn't occurred yet.
+
+<ParamField path="vote" type="bool">
+  Vote transaction filter:
+  - `true` - Only vote transactions
+  - `false` - Only non-vote transactions
+  - `null` (not set) - All transactions
+</ParamField>
+
+<ParamField path="account_include" type="repeated string">
+  List of account public keys. Includes transactions that reference at least one of these accounts (including accounts loaded via address lookup tables).
+</ParamField>
+
+<ParamField path="account_exclude" type="repeated string">
+  List of account public keys. Excludes transactions that reference any of these accounts.
+</ParamField>
+
+<ParamField path="account_required" type="repeated string">
+  List of account public keys. Only includes transactions that reference ALL of these accounts.
+</ParamField>
+
+## Block Filters
+
+### SubscribeRequestFilterBlocks
+
+Filters for block updates.
+
+```protobuf
+message SubscribeRequestFilterBlocks {
+  repeated string account_include = 1;
+  optional bool include_transactions = 2;
+  optional bool include_accounts = 3;
+  optional bool include_entries = 4;
+}
+```
+
+<ParamField path="account_include" type="repeated string">
+  List of account public keys. If specified, only blocks containing transactions that touch these accounts will be included. If empty, all blocks are included.
+</ParamField>
+
+<ParamField path="include_transactions" type="bool">
+  If true, include full transaction data in block updates. Default is false to reduce bandwidth.
+</ParamField>
+
+<ParamField path="include_accounts" type="bool">
+  If true, include full account update data in block updates. Default is false to reduce bandwidth.
+</ParamField>
+
+<ParamField path="include_entries" type="bool">
+  If true, include entry data in block updates. Default is false.
+</ParamField>
+
+#### Example: All Blocks with Transaction Data
+
+```json
+{
+  "include_transactions": true,
+  "include_accounts": false
+}
+```
+
+#### Example: Blocks Involving Specific Accounts
+
+```json
+{
+  "account_include": [
+    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+  ],
+  "include_transactions": true
+}
+```
+
+### SubscribeRequestFilterBlocksMeta
+
+Filter for block metadata updates (without full transaction/account data).
+
+```protobuf
+message SubscribeRequestFilterBlocksMeta {}
+```
+
+This is an empty filter - simply include it to subscribe to block metadata updates.
+
+#### Example: Block Metadata Only
+
+```json
+{}
+```
+
+## Slot Filters
+
+### SubscribeRequestFilterSlots
+
+Filters for slot updates.
+
+```protobuf
+message SubscribeRequestFilterSlots {
+  optional bool filter_by_commitment = 1;
+  optional bool interslot_updates = 2;
+}
+```
+
+<ParamField path="filter_by_commitment" type="bool">
+  If true, only send slot updates that match the commitment level specified in the `SubscribeRequest`. If false or not set, send all slot status updates regardless of commitment.
+</ParamField>
+
+<ParamField path="interslot_updates" type="bool">
+  If true, send additional slot status updates between major commitment levels (e.g., FIRST_SHRED_RECEIVED, CREATED_BANK, COMPLETED). Default is false.
+</ParamField>
+
+#### Example: All Slot Updates
+
+```json
+{}
+```
+
+#### Example: Commitment-Filtered Slots with Inter-Slot Updates
+
+```json
+{
+  "filter_by_commitment": true,
+  "interslot_updates": true
+}
+```
+
+## Entry Filters
+
+### SubscribeRequestFilterEntry
+
+Filter for Proof of History entry updates.
+
+```protobuf
+message SubscribeRequestFilterEntry {}
+```
+
+This is an empty filter - simply include it to subscribe to entry updates.
+
+#### Example: Entry Updates
+
+```json
+{}
+```
+
+## Commitment Levels
+
+### CommitmentLevel Enum
+
+Defines when updates are sent based on confirmation status.
+
+```protobuf
+enum CommitmentLevel {
+  PROCESSED = 0;
+  CONFIRMED = 1;
+  FINALIZED = 2;
+}
+```
+
+<ResponseField name="PROCESSED" type="0">
+  Updates sent as soon as the transaction/block is processed by a validator. Fastest but may be subject to rollback.
+</ResponseField>
+
+<ResponseField name="CONFIRMED" type="1">
+  Updates sent after the block is confirmed by a supermajority of the cluster. Default level. Balance between speed and safety.
+</ResponseField>
+
+<ResponseField name="FINALIZED" type="2">
+  Updates sent only after the block is finalized (rooted). Safest but slowest. Immune to rollbacks.
+</ResponseField>
+
+## Related
+
+- [SubscribeRequest](/api/messages/subscribe-request) - Main request message that uses these filters
+- [Account Messages](/api/messages/account) - Account update message details
+- [Transaction Messages](/api/messages/transaction) - Transaction update message details
+- [Block Messages](/api/messages/block) - Block update message details
+- [Slot Messages](/api/messages/slot) - Slot update message details

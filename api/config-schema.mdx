@@ -1,0 +1,324 @@
+---
+title: 'Configuration Schema'
+description: 'Complete configuration reference for the Yellowstone gRPC Geyser plugin'
+---
+
+## Overview
+
+The Yellowstone gRPC Geyser plugin is configured via a JSON file passed to the Solana validator with the `--geyser-plugin-config` flag. This page documents all available configuration options.
+
+## Configuration File Structure
+
+<ParamField path="libpath" type="string" required>
+  Path to the compiled Geyser plugin library file (`.so` on Linux, `.dylib` on macOS).
+  
+  ```json
+  "libpath": "../target/release/libyellowstone_grpc_geyser.so"
+  ```
+</ParamField>
+
+### Log Configuration
+
+<ParamField path="log" type="object">
+  Logging configuration for the plugin.
+  
+  <ParamField path="log.level" type="string" default="info">
+    Log level: `trace`, `debug`, `info`, `warn`, or `error`.
+  </ParamField>
+</ParamField>
+
+### Tokio Runtime Configuration
+
+<ParamField path="tokio" type="object">
+  Configuration for the Tokio async runtime.
+  
+  <ParamField path="tokio.worker_threads" type="number">
+    Number of worker threads in the Tokio runtime. If not specified, Tokio will use the number of CPU cores.
+  </ParamField>
+  
+  <ParamField path="tokio.affinity" type="string">
+    CPU affinity configuration for threads. Accepts ranges like `"0-1,12-13"` to pin threads to specific CPU cores.
+    
+    <Warning>
+      Ensure the specified core indices are valid for your system. Invalid core numbers will cause the plugin to fail during startup.
+    </Warning>
+  </ParamField>
+</ParamField>
+
+### gRPC Server Configuration
+
+<ParamField path="grpc" type="object" required>
+  Core gRPC server configuration.
+  
+  <ParamField path="grpc.address" type="string | array" required>
+    Server bind address(es). Can be:
+    - Single TCP address: `"0.0.0.0:10000"`
+    - Single Unix socket: `"unix:///var/run/geyser.sock"`
+    - Array of addresses: `["0.0.0.0:10000", "unix:///var/run/geyser.sock"]`
+    
+    For Unix sockets, you can optionally specify file permissions:
+    ```json
+    {"path": "unix:///var/run/geyser.sock", "mode": 504}
+    ```
+  </ParamField>
+  
+  <ParamField path="grpc.tls_config" type="object">
+    TLS configuration for secure connections.
+    
+    <ParamField path="grpc.tls_config.cert_path" type="string">
+      Path to the TLS certificate file.
+    </ParamField>
+    
+    <ParamField path="grpc.tls_config.key_path" type="string">
+      Path to the TLS private key file.
+    </ParamField>
+  </ParamField>
+  
+  <ParamField path="grpc.compression" type="object">
+    Compression configuration for gRPC messages.
+    
+    <ParamField path="grpc.compression.accept" type="array" default='["gzip", "zstd"]'>
+      Compression formats accepted from clients. Supported: `"gzip"`, `"zstd"`.
+    </ParamField>
+    
+    <ParamField path="grpc.compression.send" type="array" default='["gzip", "zstd"]'>
+      Compression formats used when sending to clients. Supported: `"gzip"`, `"zstd"`.
+    </ParamField>
+  </ParamField>
+
+  <ParamField path="grpc.max_decoding_message_size" type="number | string" default="4194304">
+    Maximum size of a decoded message in bytes. Can be specified as a number or string with underscores for readability (e.g., `"4_194_304"`).
+    
+    Default is 4 MiB.
+  </ParamField>
+  
+  <ParamField path="grpc.snapshot_plugin_channel_capacity" type="number | string">
+    Capacity of the channel used for accounts from snapshot. When this limit is reached, the sender blocks validator startup.
+    
+    If `null`, no limit is applied.
+  </ParamField>
+  
+  <ParamField path="grpc.snapshot_client_channel_capacity" type="number | string" default="50000000">
+    Capacity of the client channel, applicable only with snapshot functionality.
+  </ParamField>
+  
+  <ParamField path="grpc.channel_capacity" type="number | string" default="250000">
+    Capacity of the channel per connection. Adjust based on expected message throughput.
+    
+    <Warning>
+      Setting this too low may cause messages to be dropped during high load. Setting it too high may consume excessive memory.
+    </Warning>
+  </ParamField>
+  
+  <ParamField path="grpc.unary_concurrency_limit" type="number | string" default="unlimited">
+    Maximum number of concurrent unary requests. Default is unlimited (`Semaphore::MAX_PERMITS`).
+  </ParamField>
+
+  <ParamField path="grpc.subscription_limit" type="number | string" default="1000">
+    Maximum concurrent subscriptions allowed per subscriber ID. Subscribers are identified by the `x-subscription-id` header, falling back to the remote IP address.
+  </ParamField>
+
+  <ParamField path="grpc.subscription_limit_enforce" type="boolean" default={false}>
+    When `false` (default), exceeding the subscription limit only logs and emits metrics without rejecting the connection. Set to `true` to start rejecting connections with `RESOURCE_EXHAUSTED` status.
+  </ParamField>
+  
+  <ParamField path="grpc.unary_disabled" type="boolean" default={false}>
+    Enable or disable unary gRPC methods (Ping, GetLatestBlockhash, GetBlockHeight, GetSlot, IsBlockhashValid, GetVersion).
+  </ParamField>
+  
+  <ParamField path="grpc.x_token" type="string">
+    Optional authentication token enforced on all connections via the `x-token` header.
+  </ParamField>
+  
+  <ParamField path="grpc.filter_name_size_limit" type="number" default="128">
+    Maximum size (in bytes) for filter names.
+  </ParamField>
+  
+  <ParamField path="grpc.filter_names_size_limit" type="number" default="4096">
+    Number of cached filter names before triggering cleanup.
+  </ParamField>
+  
+  <ParamField path="grpc.filter_names_cleanup_interval" type="string" default="1s">
+    Cleanup interval once filter names reach the size limit. Accepts duration strings like `"1s"`, `"500ms"`.
+  </ParamField>
+  
+  <ParamField path="grpc.replay_stored_slots" type="number | string" default="0">
+    Number of slots stored for re-broadcast (replay). Set to `0` to disable replay functionality.
+  </ParamField>
+
+  <ParamField path="grpc.encoder_threads" type="number | string" default="4">
+    Number of threads used for parallel message encoding.
+  </ParamField>
+  
+  <ParamField path="grpc.filter_limits" type="object">
+    Limits for subscription filters. See [Filter Limits](/api/filter-limits) for detailed configuration.
+  </ParamField>
+
+  <ParamField path="grpc.server_http2_adaptive_window" type="boolean">
+    Enable HTTP/2 adaptive flow control window sizing.
+  </ParamField>
+
+  <ParamField path="grpc.server_http2_keepalive_interval" type="string">
+    HTTP/2 keepalive ping interval (e.g., `"30s"`).
+  </ParamField>
+
+  <ParamField path="grpc.server_http2_keepalive_timeout" type="string">
+    HTTP/2 keepalive timeout duration (e.g., `"10s"`).
+  </ParamField>
+
+  <ParamField path="grpc.server_initial_connection_window_size" type="number">
+    Initial HTTP/2 connection window size in bytes.
+  </ParamField>
+
+  <ParamField path="grpc.server_initial_stream_window_size" type="number">
+    Initial HTTP/2 stream window size in bytes.
+  </ParamField>
+
+  <ParamField path="grpc.traffic_reporting_byte_threhsold" type="string">
+    After how many bytes a TCP connection should update its traffic metrics for Prometheus. If not set, uses the default 64KiB threshold.
+    
+    Example: `"64KB"`, `"1MB"`
+  </ParamField>
+</ParamField>
+
+### Prometheus Configuration
+
+<ParamField path="prometheus" type="object">
+  Prometheus metrics server configuration.
+  
+  <ParamField path="prometheus.address" type="string">
+    Address to bind the Prometheus metrics HTTP server.
+    
+    ```json
+    "prometheus": {
+      "address": "0.0.0.0:8999"
+    }
+    ```
+    
+    Metrics will be available at `http://<address>/metrics`.
+  </ParamField>
+</ParamField>
+
+### Debug Configuration
+
+<ParamField path="debug_clients_http" type="boolean" default={false}>
+  Collect client filters and processed slot information and make it available on the Prometheus port at `/debug_clients`.
+  
+  Useful for debugging subscription issues and monitoring client activity.
+</ParamField>
+
+## Complete Example Configuration
+
+```json
+{
+  "libpath": "../target/release/libyellowstone_grpc_geyser.so",
+  "log": {
+    "level": "info"
+  },
+  "tokio": {
+    "worker_threads": 8,
+    "affinity": "0-1,12-13"
+  },
+  "grpc": {
+    "address": "0.0.0.0:10000",
+    "tls_config": {
+      "cert_path": "",
+      "key_path": ""
+    },
+    "compression": {
+      "accept": ["gzip", "zstd"],
+      "send": ["gzip", "zstd"]
+    },
+    "server_http2_adaptive_window": null,
+    "server_http2_keepalive_interval": null,
+    "server_http2_keepalive_timeout": null,
+    "server_initial_connection_window_size": null,
+    "server_initial_stream_window_size": null,
+    "max_decoding_message_size": "4_194_304",
+    "snapshot_plugin_channel_capacity": null,
+    "snapshot_client_channel_capacity": "50_000_000",
+    "channel_capacity": "100_000",
+    "unary_concurrency_limit": 100,
+    "unary_disabled": false,
+    "x_token": null,
+    "replay_stored_slots": 0,
+    "filter_name_size_limit": 128,
+    "filter_names_size_limit": 4096,
+    "filter_names_cleanup_interval": "1s",
+    "filter_limits": {
+      "accounts": {
+        "max": 1,
+        "any": false,
+        "account_max": 10,
+        "account_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+        "owner_max": 10,
+        "owner_reject": ["11111111111111111111111111111111"],
+        "data_slice_max": 2
+      },
+      "slots": {
+        "max": 1
+      },
+      "transactions": {
+        "max": 1,
+        "any": false,
+        "account_include_max": 10,
+        "account_include_reject": [
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        ],
+        "account_exclude_max": 10,
+        "account_required_max": 10
+      },
+      "transactions_status": {
+        "max": 1,
+        "any": false,
+        "account_include_max": 10,
+        "account_include_reject": [
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        ],
+        "account_exclude_max": 10,
+        "account_required_max": 10
+      },
+      "blocks": {
+        "max": 1,
+        "account_include_max": 10,
+        "account_include_any": false,
+        "account_include_reject": [
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        ],
+        "include_transactions": true,
+        "include_accounts": false,
+        "include_entries": false
+      },
+      "blocks_meta": {
+        "max": 1
+      },
+      "entries": {
+        "max": 1
+      }
+    }
+  },
+  "prometheus": {
+    "address": "0.0.0.0:8999"
+  }
+}
+```
+
+## Validating Configuration
+
+Before deploying your configuration, validate it using the config-check tool:
+
+```bash
+cargo run --bin config-check -- --config yellowstone-grpc-geyser/config.json
+```
+
+## Using with Solana Validator
+
+Load the plugin when starting your validator:
+
+```bash
+solana-validator --geyser-plugin-config yellowstone-grpc-geyser/config.json
+```
+
+<Warning>
+The plugin configuration must be valid JSON. Any syntax errors or unknown fields will cause the validator to fail during startup.
+</Warning>

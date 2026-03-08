@@ -1,122 +1,110 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Yellowstone gRPC",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#8317d1",
+    "light": "#8474e4",
+    "dark": "#f0eef3"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "https://media.brand.dev/70cde1fd-5744-4dfe-a85a-b1974f742edf.jpg",
+  "logo": {
+    "light": "https://media.brand.dev/d5140889-2490-44ed-97fe-d6928470d654.svg",
+    "dark": "https://media.brand.dev/d5140889-2490-44ed-97fe-d6928470d654.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/rpcpool/yellowstone-grpc"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/rpcpool/yellowstone-grpc"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "architecture"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Geyser Plugin",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "plugin/installation",
+              "plugin/configuration",
+              "plugin/deployment"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Client SDKs",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "clients/overview",
+              "clients/rust",
+              "clients/typescript",
+              "clients/other-languages"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Guides",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "guides/subscribing",
+              "guides/filtering",
+              "guides/data-slicing",
+              "guides/commitment-levels",
+              "guides/ping-pong"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/monitoring",
+              "operations/performance",
+              "operations/troubleshooting"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "gRPC Methods",
             "pages": [
-              "api-reference/introduction"
+              "api/subscribe",
+              "api/subscribe-deshred",
+              "api/unary-methods"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Message Types",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/messages/subscribe-request",
+              "api/messages/subscribe-update",
+              "api/messages/filters",
+              "api/messages/account",
+              "api/messages/transaction",
+              "api/messages/block",
+              "api/messages/slot"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "api/config-schema",
+              "api/filter-limits"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

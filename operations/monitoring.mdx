@@ -1,0 +1,286 @@
+---
+title: 'Monitoring'
+description: 'Monitor Yellowstone gRPC with Prometheus metrics'
+---
+
+## Overview
+
+Yellowstone gRPC provides comprehensive Prometheus metrics for monitoring the health and performance of your gRPC plugin. The metrics endpoint exposes real-time data about connections, subscriptions, data flow, and system health.
+
+## Configuration
+
+### Prometheus Endpoint
+
+Configure the Prometheus metrics endpoint in your `config.json`:
+
+```json
+{
+  "prometheus": {
+    "address": "0.0.0.0:8999"
+  }
+}
+```
+
+The metrics are exposed at `http://<address>/metrics` in Prometheus text format.
+
+### Debug Endpoint
+
+Enable the debug clients endpoint to view detailed information about active client connections:
+
+```json
+{
+  "debug_clients_http": true,
+  "prometheus": {
+    "address": "0.0.0.0:8999"
+  }
+}
+```
+
+Access client debug information at `http://<address>/debug_clients`.
+
+## Available Metrics
+
+### Version Information
+
+<ResponseField name="version" type="counter">
+  Plugin version information including build timestamp, git commit, package version, proto version, rustc version, and Solana version.
+</ResponseField>
+
+### Slot Metrics
+
+<ResponseField name="slot_status" type="gauge">
+  Latest received slot from Geyser by commitment level (processed/confirmed/finalized).
+</ResponseField>
+
+<ResponseField name="slot_status_plugin" type="gauge">
+  Latest processed slot in the plugin to client queues by commitment level.
+</ResponseField>
+
+### Connection Metrics
+
+<ResponseField name="connections_total" type="gauge">
+  Total number of active connections to the gRPC service.
+</ResponseField>
+
+<ResponseField name="subscriptions_total" type="gauge">
+  Total number of active subscriptions by endpoint and subscription type (accounts, slots, transactions, blocks, etc.).
+</ResponseField>
+
+<ResponseField name="grpc_concurrent_subscribe_per_tcp_connection" type="gauge">
+  Current concurrent subscriptions per remote TCP peer socket address.
+</ResponseField>
+
+### Message Queue Metrics
+
+<ResponseField name="message_queue_size" type="gauge">
+  Current size of the Geyser message queue. High values may indicate processing bottlenecks.
+</ResponseField>
+
+<ResponseField name="grpc_subscriber_queue_size" type="gauge">
+  Current size of each subscriber's channel queue by subscriber ID.
+</ResponseField>
+
+### Data Flow Metrics
+
+<ResponseField name="grpc_message_sent_count" type="counter">
+  Number of messages sent over gRPC to downstream clients by subscriber ID.
+</ResponseField>
+
+<ResponseField name="grpc_bytes_sent" type="counter">
+  Number of bytes sent over gRPC to downstream clients by subscriber ID.
+</ResponseField>
+
+<ResponseField name="grpc_subscriber_send_bandwidth_load" type="gauge">
+  Current send bandwidth load to subscriber channel in bytes per second by subscriber ID.
+</ResponseField>
+
+<ResponseField name="total_traffic_sent_bytes" type="counter">
+  Total traffic sent to all subscribers.
+</ResponseField>
+
+<ResponseField name="traffic_sent_per_remote_ip_bytes" type="counter">
+  Total traffic sent to subscribers by remote IP address.
+</ResponseField>
+
+<ResponseField name="grpc_service_outbound_bytes" type="gauge">
+  Current emitted bytes by tonic service response bodies per active subscriber stream.
+</ResponseField>
+
+### Block Reconstruction Metrics
+
+<ResponseField name="invalid_full_blocks_total" type="gauge">
+  Total number of failures when constructing full blocks, broken down by reason.
+</ResponseField>
+
+<Warning>
+  Monitor `invalid_full_blocks_total` closely. High values indicate issues with block reconstruction, which may result in incomplete data being sent to clients.
+</Warning>
+
+### Client Metrics
+
+<ResponseField name="grpc_client_disconnects_total" type="counter">
+  Total client disconnections by subscriber ID and reason.
+</ResponseField>
+
+<ResponseField name="missed_status_message_total" type="counter">
+  Number of missed messages by commitment level (processed/confirmed/finalized).
+</ResponseField>
+
+### Geyser Plugin Metrics
+
+<ResponseField name="geyser_account_update_data_size_kib" type="histogram">
+  Histogram of all account update data sizes (in KiB) received from the Geyser plugin.
+</ResponseField>
+
+<ResponseField name="yellowstone_geyser_batch_size" type="histogram">
+  Size of processed message batches from Geyser.
+</ResponseField>
+
+### Performance Metrics
+
+<ResponseField name="yellowstone_grpc_pre_encoded_cache_hit" type="counter">
+  Pre-encoded cache hits by message type.
+</ResponseField>
+
+<ResponseField name="yellowstone_grpc_pre_encoded_cache_miss" type="counter">
+  Pre-encoded cache misses by message type.
+</ResponseField>
+
+### API Metrics
+
+<ResponseField name="yellowstone_grpc_method_call_count" type="counter">
+  Total number of calls to gRPC methods (GetVersion, GetLatestBlockhash, GetBlockHeight, GetSlot, IsBlockhashValid, Ping).
+</ResponseField>
+
+<ResponseField name="yellowstone_grpc_subscription_limit_exceeded_total" type="counter">
+  Number of subscribe attempts that exceeded the per-subscriber limit by subscriber ID.
+</ResponseField>
+
+## Monitoring Best Practices
+
+### Key Metrics to Alert On
+
+1. **Connection Saturation**
+   - Monitor `connections_total` and set alerts for unusual spikes
+   - Track `grpc_client_disconnects_total` to identify stability issues
+
+2. **Queue Backlog**
+   - Alert on high `message_queue_size` (>10,000 messages)
+   - Monitor `grpc_subscriber_queue_size` per client
+
+3. **Block Reconstruction Failures**
+   - Alert on increasing `invalid_full_blocks_total`
+   - This indicates potential data integrity issues
+
+4. **Bandwidth Saturation**
+   - Track `grpc_subscriber_send_bandwidth_load` per client
+   - Monitor `total_traffic_sent_bytes` growth rate
+
+5. **Slot Processing Lag**
+   - Compare `slot_status` vs `slot_status_plugin` to detect processing delays
+   - Alert if the gap exceeds acceptable thresholds
+
+### Example Prometheus Queries
+
+```promql
+# Connection count
+connections_total
+
+# Message queue backlog
+message_queue_size
+
+# Bandwidth per subscriber (bytes/sec)
+rate(grpc_bytes_sent[5m])
+
+# Disconnect rate by reason
+rate(grpc_client_disconnects_total[5m])
+
+# Slot processing lag
+slot_status{status="confirmed"} - slot_status_plugin{status="confirmed"}
+
+# Invalid blocks rate
+rate(invalid_full_blocks_total[5m])
+```
+
+### Grafana Dashboard
+
+Create a Grafana dashboard with these panels:
+
+1. **Overview**
+   - Total connections
+   - Total subscriptions
+   - Message queue size
+   - Current slot numbers
+
+2. **Performance**
+   - Message throughput (messages/sec)
+   - Bandwidth usage (bytes/sec)
+   - Cache hit rate
+   - Batch sizes
+
+3. **Health**
+   - Invalid block count
+   - Client disconnects
+   - Missed messages
+   - Queue sizes per subscriber
+
+4. **Resource Usage**
+   - Bandwidth per IP
+   - Concurrent subscriptions per connection
+   - Queue backlogs
+
+## Health Check Endpoint
+
+The Prometheus endpoint also serves as a basic health check:
+
+```bash
+curl http://localhost:8999/metrics
+```
+
+If the endpoint responds with metrics, the plugin is running and operational.
+
+## Integration with Monitoring Systems
+
+### Prometheus Scrape Configuration
+
+```yaml
+scrape_configs:
+  - job_name: 'yellowstone-grpc'
+    static_configs:
+      - targets: ['localhost:8999']
+    scrape_interval: 15s
+```
+
+### Alert Rules Example
+
+```yaml
+groups:
+  - name: yellowstone_grpc
+    rules:
+      - alert: HighMessageQueueSize
+        expr: message_queue_size > 10000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High message queue size detected"
+          description: "Message queue has {{ $value }} messages"
+
+      - alert: InvalidBlocksDetected
+        expr: rate(invalid_full_blocks_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Invalid blocks detected"
+          description: "Block reconstruction is failing"
+
+      - alert: HighClientDisconnectRate
+        expr: rate(grpc_client_disconnects_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High client disconnect rate"
+          description: "Clients are disconnecting at {{ $value }}/sec"
+```

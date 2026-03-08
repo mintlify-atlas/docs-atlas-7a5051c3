@@ -1,0 +1,427 @@
+---
+title: 'Deployment'
+description: 'Deploy the Yellowstone gRPC Geyser plugin to a Solana validator'
+---
+
+## Overview
+
+This guide covers deploying the Yellowstone gRPC Geyser plugin to a Solana validator. The plugin integrates with the validator's Geyser interface to stream real-time blockchain data over gRPC.
+
+## Prerequisites
+
+Before deploying the plugin:
+
+1. [Build and install the plugin](/plugin/installation)
+2. [Configure the plugin](/plugin/configuration)
+3. Have a running Solana validator (Agave-based)
+4. Ensure the validator has sufficient resources for the plugin's workload
+
+## Deployment Methods
+
+### Method 1: Command Line Flag
+
+The simplest method is to pass the plugin configuration as a command-line argument when starting the validator.
+
+<Steps>
+  <Step title="Prepare Configuration File">
+    Ensure your `config.json` file is properly configured and validated:
+
+    ```bash
+    cargo run --bin config-check -- --config yellowstone-grpc-geyser/config.json
+    ```
+  </Step>
+
+  <Step title="Start Validator with Plugin">
+    Start your Solana validator with the `--geyser-plugin-config` flag:
+
+    ```bash
+    solana-validator --geyser-plugin-config yellowstone-grpc-geyser/config.json
+    ```
+
+    This loads the plugin when the validator starts.
+  </Step>
+
+  <Step title="Verify Plugin Loaded">
+    Check the validator logs to confirm the plugin loaded successfully:
+
+    ```bash
+    tail -f ~/solana-ledger/validator.log | grep -i geyser
+    ```
+
+    You should see log messages indicating the plugin initialized.
+  </Step>
+</Steps>
+
+### Method 2: Systemd Service
+
+For production deployments, integrate the plugin into your systemd service configuration.
+
+<Steps>
+  <Step title="Edit Systemd Service File">
+    Edit your validator's systemd service file (usually located at `/etc/systemd/system/solana-validator.service`):
+
+    ```bash
+    sudo nano /etc/systemd/system/solana-validator.service
+    ```
+  </Step>
+
+  <Step title="Add Geyser Plugin Flag">
+    Add the `--geyser-plugin-config` flag to the `ExecStart` line:
+
+    ```ini
+    [Unit]
+    Description=Solana Validator
+    After=network.target
+    Wants=solana-sys-tuner.service
+    StartLimitIntervalSec=0
+
+    [Service]
+    Type=simple
+    Restart=on-failure
+    RestartSec=1
+    User=solana
+    LimitNOFILE=1000000
+    LogRateLimitIntervalSec=0
+    Environment="PATH=/home/solana/.local/share/solana/install/active_release/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    ExecStart=/home/solana/.local/share/solana/install/active_release/bin/solana-validator \
+      --identity /home/solana/validator-keypair.json \
+      --known-validator 7Np41oeYqPefeNQEHSv1UDhYrehxin3NStELsSKCT4K2 \
+      --known-validator GdnSyH3YtwcxFvQrVVJMm1JhTS4QVX7MFsX56uJLUfiZ \
+      --known-validator DE1bawNcRJB9rVm3buyMVfr8mBEoyyu73NBovf2oXJsJ \
+      --known-validator CakcnaRDHka2gXyfbEd2d3xsvkJkqsLw2akB3zsN1D2S \
+      --only-known-rpc \
+      --ledger /home/solana/solana-ledger \
+      --accounts /home/solana/solana-accounts \
+      --log /home/solana/solana-ledger/validator.log \
+      --rpc-port 8899 \
+      --dynamic-port-range 8000-8020 \
+      --entrypoint entrypoint.mainnet-beta.solana.com:8001 \
+      --entrypoint entrypoint2.mainnet-beta.solana.com:8001 \
+      --entrypoint entrypoint3.mainnet-beta.solana.com:8001 \
+      --entrypoint entrypoint4.mainnet-beta.solana.com:8001 \
+      --entrypoint entrypoint5.mainnet-beta.solana.com:8001 \
+      --expected-genesis-hash 5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d \
+      --wal-recovery-mode skip_any_corrupted_record \
+      --limit-ledger-size \
+      --geyser-plugin-config /opt/solana/yellowstone-grpc-geyser/config.json
+
+    [Install]
+    WantedBy=multi-user.target
+    ```
+
+    <Note>
+      Update the path to your actual config file location.
+    </Note>
+  </Step>
+
+  <Step title="Reload and Restart Service">
+    Reload systemd and restart the validator:
+
+    ```bash
+    sudo systemctl daemon-reload
+    sudo systemctl restart solana-validator
+    ```
+  </Step>
+
+  <Step title="Check Service Status">
+    Verify the validator is running with the plugin:
+
+    ```bash
+    sudo systemctl status solana-validator
+    ```
+
+    Check logs for plugin initialization:
+
+    ```bash
+    sudo journalctl -u solana-validator -f | grep -i geyser
+    ```
+  </Step>
+</Steps>
+
+## Verification
+
+After deployment, verify the plugin is working correctly:
+
+### Check gRPC Endpoint
+
+Test that the gRPC server is listening:
+
+```bash
+netstat -tlnp | grep 10000
+```
+
+You should see the configured gRPC port (default: 10000) in LISTEN state.
+
+### Check Prometheus Metrics
+
+Verify the Prometheus endpoint is accessible:
+
+```bash
+curl http://localhost:8999/metrics
+```
+
+You should see various metrics including:
+- `invalid_full_blocks_total`: Count of failed block reconstructions
+- Connection and subscription metrics
+- Message processing metrics
+
+### Test gRPC Connection
+
+Use a gRPC client to test the connection. Here's an example using grpcurl:
+
+```bash
+grpcurl -plaintext localhost:10000 geyser.Geyser/Ping
+```
+
+<Note>
+  If you have TLS enabled, omit the `-plaintext` flag and add appropriate certificate options.
+</Note>
+
+## Performance Tuning
+
+### CPU Affinity
+
+Optimize performance by setting CPU affinity in your configuration:
+
+```json
+"tokio": {
+  "worker_threads": 16,
+  "affinity": "0-7,16-23"
+}
+```
+
+This pins worker threads to specific CPU cores, reducing context switching.
+
+### Channel Capacities
+
+Adjust channel capacities based on your workload:
+
+```json
+"grpc": {
+  "channel_capacity": "500_000",
+  "snapshot_client_channel_capacity": "100_000_000"
+}
+```
+
+Higher capacities allow more messages to buffer but use more memory.
+
+### Worker Threads
+
+Set worker threads based on available CPU cores:
+
+```json
+"tokio": {
+  "worker_threads": 16
+}
+```
+
+A good starting point is the number of physical cores on your system.
+
+## Monitoring
+
+### Prometheus Metrics
+
+The plugin exposes metrics at the configured Prometheus endpoint (default: `http://localhost:8999/metrics`).
+
+Key metrics to monitor:
+
+- **invalid_full_blocks_total**: Blocks that failed reconstruction
+- **active_subscriptions**: Current number of active client subscriptions
+- **messages_sent_total**: Total messages sent to clients
+- **messages_dropped_total**: Messages dropped due to slow clients
+
+### Integration with Monitoring Systems
+
+Configure Prometheus to scrape the metrics endpoint:
+
+```yaml
+scrape_configs:
+  - job_name: 'yellowstone-grpc'
+    static_configs:
+      - targets: ['localhost:8999']
+```
+
+### Logging
+
+Monitor logs for errors and warnings:
+
+```bash
+# For systemd-managed validators
+sudo journalctl -u solana-validator -f | grep -i "geyser\|yellowstone"
+
+# For log file-based validators
+tail -f ~/solana-ledger/validator.log | grep -i "geyser\|yellowstone"
+```
+
+## Block Reconstruction
+
+The plugin reconstructs full blocks from Geyser events. Be aware of the following:
+
+<Warning>
+  **Known Issue**: Blocks generated on validators always have zero entries due to a limitation in the Geyser interface. See [solana-labs/solana#33823](https://github.com/solana-labs/solana/issues/33823).
+</Warning>
+
+By default, failed block reconstructions are logged. You can change this behavior in the configuration:
+
+```json
+"block_fail_action": "log"
+```
+
+Options:
+- `"log"`: Log an error and increment `invalid_full_blocks_total` metric
+- `"panic"`: Panic on reconstruction failure (use with caution)
+
+## Security Considerations
+
+### TLS Encryption
+
+For production deployments, always enable TLS:
+
+```json
+"tls_config": {
+  "cert_path": "/etc/ssl/certs/grpc-server.crt",
+  "key_path": "/etc/ssl/private/grpc-server.key"
+}
+```
+
+Generate certificates using Let's Encrypt or your organization's PKI.
+
+### Authentication
+
+Enable token-based authentication to restrict access:
+
+```json
+"x_token": "your-secure-token-here"
+```
+
+Clients must include this token in the `x-token` header.
+
+### Network Isolation
+
+Bind to specific interfaces to limit exposure:
+
+```json
+"grpc": {
+  "address": "10.0.0.5:10000"
+}
+```
+
+For local-only access:
+
+```json
+"grpc": {
+  "address": "127.0.0.1:10000"
+}
+```
+
+### Firewall Rules
+
+Configure firewall rules to restrict access to the gRPC port:
+
+```bash
+# Allow specific IP range
+sudo ufw allow from 10.0.0.0/24 to any port 10000
+
+# Deny all other access
+sudo ufw deny 10000
+```
+
+## Troubleshooting
+
+### Plugin Fails to Load
+
+If the plugin fails to load:
+
+1. Check the library path in config.json
+2. Verify the .so file exists and is executable
+3. Check validator logs for error messages
+4. Validate configuration with config-check tool
+
+### gRPC Server Not Starting
+
+If the gRPC server doesn't start:
+
+1. Check if the port is already in use: `netstat -tlnp | grep 10000`
+2. Verify bind address is correct
+3. Check firewall rules
+4. Review logs for binding errors
+
+### High Memory Usage
+
+If memory usage is high:
+
+1. Reduce channel capacities in configuration
+2. Lower worker thread count
+3. Enable and tune filter limits to prevent abuse
+4. Monitor active subscriptions
+
+### Block Reconstruction Failures
+
+If you see many `invalid_full_blocks_total` increments:
+
+1. Check validator logs for related errors
+2. Verify validator is synced and healthy
+3. Check if this is due to the known zero-entries issue
+4. Monitor system resources (CPU, memory, disk I/O)
+
+## Maintenance
+
+### Updating the Plugin
+
+To update the plugin:
+
+<Steps>
+  <Step title="Build New Version">
+    ```bash
+    cd yellowstone-grpc
+    git pull
+    cargo build --release -p yellowstone-grpc-geyser
+    ```
+  </Step>
+
+  <Step title="Stop Validator">
+    ```bash
+    sudo systemctl stop solana-validator
+    ```
+  </Step>
+
+  <Step title="Replace Plugin">
+    ```bash
+    sudo cp target/release/libyellowstone_grpc_geyser.so /opt/solana/geyser-plugins/
+    ```
+  </Step>
+
+  <Step title="Start Validator">
+    ```bash
+    sudo systemctl start solana-validator
+    ```
+  </Step>
+</Steps>
+
+### Configuration Changes
+
+To change configuration:
+
+1. Validate the new configuration with config-check
+2. Stop the validator
+3. Update config.json
+4. Start the validator
+5. Verify the changes took effect
+
+<Warning>
+  Configuration changes require a validator restart. Plan maintenance windows accordingly.
+</Warning>
+
+## Next Steps
+
+After deploying the plugin:
+
+1. [Learn about filters](/guides/filtering) - Understand how to filter streamed data
+2. [Explore client examples](/clients/overview) - See example implementations in various languages
+3. [Review the gRPC API](/api/subscribe) - Learn about available RPC methods
+
+## Additional Resources
+
+- [Triton One Documentation](https://docs.triton.one/rpc-pool/grpc-subscriptions)
+- [GitHub Repository](https://github.com/rpcpool/yellowstone-grpc)
+- [Solana Geyser Plugin Interface](https://docs.solana.com/developing/plugins/geyser-plugins)

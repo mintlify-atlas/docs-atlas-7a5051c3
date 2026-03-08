@@ -1,0 +1,618 @@
+---
+title: 'TypeScript / Node.js Client'
+description: 'Official TypeScript/Node.js client for Yellowstone gRPC with native bindings'
+---
+
+The TypeScript client provides a high-performance interface to Yellowstone gRPC with native Rust bindings via NAPI-RS.
+
+## Installation
+
+Install the client from npm:
+
+<CodeGroup>
+```bash npm
+npm install @triton-one/yellowstone-grpc
+```
+
+```bash yarn
+yarn add @triton-one/yellowstone-grpc
+```
+
+```bash pnpm
+pnpm add @triton-one/yellowstone-grpc
+```
+</CodeGroup>
+
+### Requirements
+
+- Node.js >= 20.18.0
+- Supported platforms:
+  - Linux x64 (GNU and musl)
+  - macOS x64 and ARM64 (Apple Silicon)
+
+## Quick Start
+
+### Basic Connection
+
+Connect to a Yellowstone gRPC server:
+
+```typescript
+import Client from "@triton-one/yellowstone-grpc";
+
+async function main() {
+  const client = new Client(
+    "https://api.rpcpool.com:443",
+    "your-token-here",
+    {
+      grpcMaxDecodingMessageSize: 64 * 1024 * 1024, // 64 MiB
+    }
+  );
+
+  await client.connect();
+
+  const version = await client.getVersion();
+  console.log("Server version:", version);
+}
+
+main();
+```
+
+### Client Constructor
+
+```typescript
+const client = new Client(
+  endpoint: string,
+  xToken: string | undefined,
+  channelOptions: JsChannelOptions | undefined
+);
+```
+
+**Parameters:**
+- `endpoint` - gRPC server URL (e.g., `"http://localhost:10000"`)
+- `xToken` - Optional authentication token
+- `channelOptions` - Optional gRPC channel configuration:
+  - `grpcMaxDecodingMessageSize` - Max message size in bytes (default: 4 MiB)
+
+## Streaming Subscriptions
+
+### Subscribe to Slots
+
+```typescript
+import Client, {
+  CommitmentLevel,
+  SubscribeRequest,
+} from "@triton-one/yellowstone-grpc";
+
+const client = new Client("http://localhost:10000", undefined, undefined);
+await client.connect();
+
+const stream = await client.subscribe();
+
+// Handle stream events
+stream.on("data", (data) => {
+  if (data.slot) {
+    console.log("Slot update:", data.slot.slot);
+  }
+});
+
+stream.on("error", (error) => {
+  console.error("Stream error:", error);
+  stream.end();
+});
+
+stream.on("end", () => {
+  console.log("Stream ended");
+});
+
+stream.on("close", () => {
+  console.log("Stream closed");
+});
+
+// Create subscription request
+const request: SubscribeRequest = {
+  slots: {
+    client: {
+      filterByCommitment: true,
+    },
+  },
+  commitment: CommitmentLevel.PROCESSED,
+  accounts: {},
+  transactions: {},
+  transactionsStatus: {},
+  entry: {},
+  blocks: {},
+  blocksMeta: {},
+  accountsDataSlice: [],
+  ping: undefined,
+};
+
+// Send subscription
+await new Promise((resolve, reject) => {
+  stream.write(request, (err) => {
+    if (err) reject(err);
+    else resolve(null);
+  });
+});
+```
+
+### Subscribe to Accounts
+
+```typescript
+import {
+  SubscribeRequest,
+  CommitmentLevel,
+} from "@triton-one/yellowstone-grpc";
+
+const request: SubscribeRequest = {
+  accounts: {
+    client: {
+      account: [
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      ],
+      owner: [
+        "11111111111111111111111111111111",
+      ],
+      filters: [
+        {
+          datasize: 165,
+        },
+      ],
+      nonemptyTxnSignature: true,
+    },
+  },
+  commitment: CommitmentLevel.CONFIRMED,
+  slots: {},
+  transactions: {},
+  transactionsStatus: {},
+  entry: {},
+  blocks: {},
+  blocksMeta: {},
+  accountsDataSlice: [],
+  ping: undefined,
+};
+
+const stream = await client.subscribe();
+
+stream.on("data", (data) => {
+  if (data.account) {
+    console.log("Account update:");
+    console.log("  Slot:", data.account.slot);
+    console.log("  Account:", data.account.account);
+  }
+});
+
+stream.write(request);
+```
+
+### Subscribe to Transactions
+
+```typescript
+const request: SubscribeRequest = {
+  transactions: {
+    client: {
+      vote: false,
+      failed: false,
+      accountInclude: [
+        "11111111111111111111111111111111",
+      ],
+      accountExclude: [],
+      accountRequired: [],
+    },
+  },
+  commitment: CommitmentLevel.CONFIRMED,
+  slots: {},
+  accounts: {},
+  transactionsStatus: {},
+  entry: {},
+  blocks: {},
+  blocksMeta: {},
+  accountsDataSlice: [],
+  ping: undefined,
+};
+
+const stream = await client.subscribe();
+
+stream.on("data", (data) => {
+  if (data.transaction) {
+    console.log("Transaction:");
+    console.log("  Slot:", data.transaction.slot);
+    console.log("  Signature:", data.transaction.transaction.signature);
+  }
+});
+
+stream.write(request);
+```
+
+### Subscribe to Blocks
+
+```typescript
+const request: SubscribeRequest = {
+  blocks: {
+    client: {
+      accountInclude: [],
+      includeTransactions: true,
+      includeAccounts: false,
+      includeEntries: false,
+    },
+  },
+  commitment: CommitmentLevel.CONFIRMED,
+  slots: {},
+  accounts: {},
+  transactions: {},
+  transactionsStatus: {},
+  entry: {},
+  blocksMeta: {},
+  accountsDataSlice: [],
+  ping: undefined,
+};
+
+const stream = await client.subscribe();
+
+stream.on("data", (data) => {
+  if (data.block) {
+    console.log("Block:");
+    console.log("  Slot:", data.block.slot);
+    console.log("  Blockhash:", data.block.blockhash);
+    console.log("  Transactions:", data.block.transactions?.length || 0);
+  }
+});
+
+stream.write(request);
+```
+
+## Transaction Encoding
+
+The client provides utilities for encoding transaction data to different formats:
+
+```typescript
+import { txEncode, SubscribeUpdateTransactionInfo } from "@triton-one/yellowstone-grpc";
+
+stream.on("data", (data) => {
+  if (data.transaction) {
+    const message: SubscribeUpdateTransactionInfo = data.transaction.transaction;
+
+    // Encode to JSON
+    const tx = txEncode.encode(
+      message,
+      txEncode.encoding.Json,
+      255, // max_supported_transaction_version
+      true // show_rewards
+    );
+
+    console.log("Transaction JSON:", JSON.stringify(tx, null, 2));
+  }
+});
+```
+
+### Available Encodings
+
+```typescript
+// Access encoding types
+import { txEncode } from "@triton-one/yellowstone-grpc";
+
+const encodingTypes = txEncode.encoding;
+// Available: Json, Base58, Base64, JsonParsed, etc.
+```
+
+## Transaction Error Decoding
+
+Decode transaction errors from raw bytes:
+
+```typescript
+import { txErrDecode } from "@triton-one/yellowstone-grpc";
+
+stream.on("data", (data) => {
+  if (data.transaction?.transaction?.meta?.err) {
+    const errBytes = data.transaction.transaction.meta.err.err;
+    const decodedError = txErrDecode.decode(errBytes);
+    console.log("Transaction error:", decodedError);
+  }
+});
+```
+
+## Unary RPC Methods
+
+### Ping
+
+```typescript
+const count = await client.ping(1);
+console.log("Pong count:", count);
+```
+
+### Get Version
+
+```typescript
+const version = await client.getVersion();
+console.log("Server version:", version);
+```
+
+### Get Slot
+
+```typescript
+import { CommitmentLevel } from "@triton-one/yellowstone-grpc";
+
+const slot = await client.getSlot(CommitmentLevel.FINALIZED);
+console.log("Current slot:", slot);
+```
+
+### Get Block Height
+
+```typescript
+const blockHeight = await client.getBlockHeight(CommitmentLevel.FINALIZED);
+console.log("Block height:", blockHeight);
+```
+
+### Get Latest Blockhash
+
+```typescript
+const response = await client.getLatestBlockhash(CommitmentLevel.FINALIZED);
+console.log("Blockhash:", response.blockhash);
+console.log("Last valid block height:", response.lastValidBlockHeight);
+```
+
+### Is Blockhash Valid
+
+```typescript
+const blockhash = "EkSnNWid2cvwEVnVx9aBqawnmiCNiDgp3gUdkDPTKN1N";
+const response = await client.isBlockhashValid(
+  blockhash,
+  CommitmentLevel.FINALIZED
+);
+console.log("Is valid:", response.valid);
+```
+
+### Subscribe Replay Info
+
+```typescript
+const replayInfo = await client.subscribeReplayInfo();
+console.log("Replay info:", replayInfo);
+```
+
+## Account Filters
+
+### Filter by Data Size
+
+```typescript
+const request: SubscribeRequest = {
+  accounts: {
+    client: {
+      account: [],
+      owner: [],
+      filters: [
+        {
+          datasize: 165, // Token account size
+        },
+      ],
+    },
+  },
+  // ... other fields
+};
+```
+
+### Filter by Memcmp
+
+```typescript
+const request: SubscribeRequest = {
+  accounts: {
+    client: {
+      account: [],
+      owner: [],
+      filters: [
+        {
+          memcmp: {
+            offset: 32,
+            base58: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+          },
+        },
+      ],
+    },
+  },
+  // ... other fields
+};
+```
+
+### Filter by Lamports
+
+```typescript
+import { SubscribeRequestFilterAccountsFilterLamports } from "@triton-one/yellowstone-grpc";
+
+const request: SubscribeRequest = {
+  accounts: {
+    client: {
+      account: [],
+      owner: [],
+      filters: [
+        {
+          lamports: {
+            gt: "1000000000", // Greater than 1 SOL
+          } as SubscribeRequestFilterAccountsFilterLamports,
+        },
+      ],
+    },
+  },
+  // ... other fields
+};
+```
+
+### Token Account State Filter
+
+```typescript
+const request: SubscribeRequest = {
+  accounts: {
+    client: {
+      account: [],
+      owner: [],
+      filters: [
+        {
+          tokenAccountState: true,
+        },
+      ],
+    },
+  },
+  // ... other fields
+};
+```
+
+## Complete Example
+
+Here's a complete example that subscribes to multiple data types:
+
+```typescript
+import Client, {
+  CommitmentLevel,
+  SubscribeRequest,
+} from "@triton-one/yellowstone-grpc";
+
+async function main() {
+  const client = new Client(
+    "http://localhost:10000",
+    undefined,
+    {
+      grpcMaxDecodingMessageSize: 64 * 1024 * 1024,
+    }
+  );
+
+  await client.connect();
+  console.log("Connected to gRPC server");
+
+  const stream = await client.subscribe();
+
+  // Handle stream lifecycle
+  const streamClosed = new Promise<void>((resolve, reject) => {
+    stream.on("error", (error) => {
+      console.error("Stream error:", error);
+      reject(error);
+      stream.end();
+    });
+
+    stream.on("end", () => {
+      console.log("Stream ended");
+      resolve();
+    });
+
+    stream.on("close", () => {
+      console.log("Stream closed");
+      resolve();
+    });
+  });
+
+  // Handle data
+  stream.on("data", (data) => {
+    if (data.slot) {
+      console.log(`Slot: ${data.slot.slot}`);
+    }
+
+    if (data.account) {
+      console.log(`Account update at slot ${data.account.slot}`);
+    }
+
+    if (data.transaction) {
+      console.log(`Transaction at slot ${data.transaction.slot}`);
+    }
+  });
+
+  // Subscribe to slots, accounts, and transactions
+  const request: SubscribeRequest = {
+    slots: {
+      client: {
+        filterByCommitment: true,
+      },
+    },
+    accounts: {
+      client: {
+        account: [],
+        owner: ["11111111111111111111111111111111"],
+        filters: [],
+      },
+    },
+    transactions: {
+      client: {
+        vote: false,
+        failed: false,
+        accountInclude: ["11111111111111111111111111111111"],
+      },
+    },
+    commitment: CommitmentLevel.CONFIRMED,
+    transactionsStatus: {},
+    entry: {},
+    blocks: {},
+    blocksMeta: {},
+    accountsDataSlice: [],
+    ping: undefined,
+  };
+
+  // Send subscription request
+  await new Promise<void>((resolve, reject) => {
+    stream.write(request, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+
+  console.log("Subscription active");
+
+  // Wait for stream to close
+  await streamClosed;
+}
+
+main().catch(console.error);
+```
+
+## Commitment Levels
+
+Available commitment levels:
+
+```typescript
+import { CommitmentLevel } from "@triton-one/yellowstone-grpc";
+
+CommitmentLevel.PROCESSED  // Latest block, may be rolled back
+CommitmentLevel.CONFIRMED  // Block confirmed by cluster
+CommitmentLevel.FINALIZED  // Block finalized by cluster
+```
+
+## Error Handling
+
+```typescript
+try {
+  await client.connect();
+  const version = await client.getVersion();
+  console.log("Version:", version);
+} catch (error) {
+  if (error.code) {
+    console.error(`gRPC error [${error.code}]: ${error.message}`);
+  } else {
+    console.error("Connection error:", error);
+  }
+}
+```
+
+## TypeScript Types
+
+The package includes full TypeScript definitions for all request and response types:
+
+```typescript
+import type {
+  SubscribeRequest,
+  SubscribeUpdate,
+  SubscribeUpdateAccount,
+  SubscribeUpdateAccountInfo,
+  SubscribeUpdateSlot,
+  SubscribeUpdateTransaction,
+  SubscribeUpdateTransactionInfo,
+  SubscribeRequestFilterAccounts,
+  SubscribeRequestFilterTransactions,
+  SubscribeRequestFilterSlots,
+  CommitmentLevel,
+} from "@triton-one/yellowstone-grpc";
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Subscribe Filters" href="/guides/filtering">
+    Learn more about subscription filters
+  </Card>
+  <Card title="Plugin Setup" href="/plugin/installation">
+    Set up your own Yellowstone gRPC plugin
+  </Card>
+</CardGroup>

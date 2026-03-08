@@ -1,0 +1,236 @@
+---
+title: "Account Messages"
+description: "Account-related message types for Geyser updates"
+---
+
+## Overview
+
+Account messages contain information about Solana account updates. These messages are sent when accounts matching your subscription filters are modified.
+
+## SubscribeUpdateAccount
+
+Wrapper message for account updates in the subscription stream.
+
+```protobuf
+message SubscribeUpdateAccount {
+  SubscribeUpdateAccountInfo account = 1;
+  uint64 slot = 2;
+  bool is_startup = 3;
+}
+```
+
+### Fields
+
+<ResponseField name="account" type="SubscribeUpdateAccountInfo" required>
+  The detailed account information including pubkey, data, owner, and other metadata.
+</ResponseField>
+
+<ResponseField name="slot" type="uint64" required>
+  The slot number when this account update occurred.
+</ResponseField>
+
+<ResponseField name="is_startup" type="bool" required>
+  Indicates whether this update is from the initial startup load. If true, this account state existed before your subscription started. If false, this is a new update that occurred during your subscription.
+  
+  Useful for distinguishing between:
+  - Historical state (loaded during startup)
+  - Real-time updates (occurred after subscription)
+</ResponseField>
+
+### Example
+
+```json
+{
+  "account": {
+    "pubkey": "7xLk17EQQ5KLDLDe44wCmupJKJjTGd8hs3eSVVhCx932",
+    "lamports": 1461600,
+    "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    "executable": false,
+    "rent_epoch": 361,
+    "data": "AQAAAAblHxdW...",
+    "write_version": 12345,
+    "txn_signature": "5j7s6NiJS3JAkvgkoc18WVAsiSaci2pxB2A6ueCJP4tprA2TFg9wSyTLeYouxPBJEMzJinENTkpA52YStRW5Dia7"
+  },
+  "slot": 250000000,
+  "is_startup": false
+}
+```
+
+## SubscribeUpdateAccountInfo
+
+Detailed account information.
+
+```protobuf
+message SubscribeUpdateAccountInfo {
+  bytes pubkey = 1;
+  uint64 lamports = 2;
+  bytes owner = 3;
+  bool executable = 4;
+  uint64 rent_epoch = 5;
+  bytes data = 6;
+  uint64 write_version = 7;
+  optional bytes txn_signature = 8;
+}
+```
+
+### Fields
+
+<ResponseField name="pubkey" type="bytes" required>
+  The public key (address) of the account as 32 bytes. Convert to base58 for the familiar Solana address format.
+</ResponseField>
+
+<ResponseField name="lamports" type="uint64" required>
+  The account's lamport balance. 1 SOL = 1,000,000,000 lamports.
+</ResponseField>
+
+<ResponseField name="owner" type="bytes" required>
+  The public key of the program that owns this account, as 32 bytes. This program has write access to the account's data.
+  
+  Common owners:
+  - `11111111111111111111111111111111` - System Program (regular wallets)
+  - `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA` - SPL Token Program
+  - `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL` - Associated Token Account Program
+</ResponseField>
+
+<ResponseField name="executable" type="bool" required>
+  Whether this account contains executable program code. True for program accounts, false for data accounts.
+</ResponseField>
+
+<ResponseField name="rent_epoch" type="uint64" required>
+  The epoch at which this account will next owe rent. Most accounts are now rent-exempt.
+</ResponseField>
+
+<ResponseField name="data" type="bytes" required>
+  The raw account data as bytes. The structure of this data depends on the owning program.
+  
+  - For token accounts: Contains mint address, owner, and balance
+  - For program accounts: Contains executable code
+  - For custom programs: Contains program-specific state
+  
+  May be sliced if you specified `accounts_data_slice` in your subscription request.
+</ResponseField>
+
+<ResponseField name="write_version" type="uint64" required>
+  An incrementing version number that increases each time the account is modified. Useful for:
+  - Detecting concurrent modifications
+  - Ordering updates
+  - Implementing optimistic locking
+</ResponseField>
+
+<ResponseField name="txn_signature" type="bytes">
+  Optional transaction signature (64 bytes) of the transaction that caused this account update. Only present for updates caused by transactions, not for startup loads.
+  
+  This field helps you:
+  - Link account changes to specific transactions
+  - Filter out startup account loads (when null)
+  - Track the origin of state changes
+</ResponseField>
+
+### Example: Token Account
+
+```json
+{
+  "pubkey": "7xLk17EQQ5KLDLDe44wCmupJKJjTGd8hs3eSVVhCx932",
+  "lamports": 2039280,
+  "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+  "executable": false,
+  "rent_epoch": 361,
+  "data": "AQAAAAblHxdW9W8pKnE4ZsH6ZsH6ZsH6ZsH6ZsH6ZsH6ZsH6ZsH6ZsH6ZsH6ZsH6ZsH6",
+  "write_version": 54321,
+  "txn_signature": "3Uxv5kZX8xJLtFUV4wQPjZBFJKMKBdJqKDJpqQnqJe3X..."
+}
+```
+
+### Example: System Account (Wallet)
+
+```json
+{
+  "pubkey": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+  "lamports": 5000000000,
+  "owner": "11111111111111111111111111111111",
+  "executable": false,
+  "rent_epoch": 361,
+  "data": "",
+  "write_version": 98765
+}
+```
+
+### Example: Program Account
+
+```json
+{
+  "pubkey": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+  "lamports": 1141440,
+  "owner": "BPFLoaderUpgradeab1e11111111111111111111111",
+  "executable": true,
+  "rent_epoch": 361,
+  "data": "02000000...",
+  "write_version": 1
+}
+```
+
+## Data Slicing
+
+You can request only portions of account data using `accounts_data_slice` in your `SubscribeRequest`:
+
+```json
+{
+  "accounts": {
+    "my_filter": {
+      "owner": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"]
+    }
+  },
+  "accounts_data_slice": [
+    {
+      "offset": 0,
+      "length": 32
+    }
+  ]
+}
+```
+
+This will return only the first 32 bytes of each token account's data (the mint address).
+
+## Processing Account Updates
+
+### Filtering Startup vs Real-Time Updates
+
+```javascript
+if (update.account) {
+  if (update.account.is_startup) {
+    console.log('Startup account load:', accountPubkey);
+    // Initialize your cache/database
+  } else {
+    console.log('Real-time account update:', accountPubkey);
+    // Process the change
+  }
+}
+```
+
+### Tracking Transaction Origins
+
+```javascript
+if (update.account && update.account.account.txn_signature) {
+  console.log('Account modified by transaction:', 
+    base58.encode(update.account.account.txn_signature));
+}
+```
+
+### Decoding Token Account Data
+
+For SPL token accounts, the data field contains:
+- Bytes 0-31: Mint address
+- Bytes 32-63: Owner address  
+- Bytes 64-71: Amount (uint64, little-endian)
+- Byte 72: Delegate option
+- Bytes 73-104: Delegate address (if present)
+- Byte 105: State (0=Uninitialized, 1=Initialized, 2=Frozen)
+- And more...
+
+See the [SPL Token documentation](https://spl.solana.com/token) for full account structure details.
+
+## Related
+
+- [Filter Messages](/api/messages/filters#account-filters) - Account filter configuration
+- [SubscribeRequest](/api/messages/subscribe-request) - How to subscribe to account updates
+- [SubscribeUpdate](/api/messages/subscribe-update) - Parent message containing account updates

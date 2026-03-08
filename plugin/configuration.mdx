@@ -1,0 +1,450 @@
+---
+title: 'Configuration'
+description: 'Configure the Yellowstone gRPC Geyser plugin'
+---
+
+## Overview
+
+The Yellowstone gRPC Geyser plugin is configured using a JSON configuration file. This file defines gRPC server settings, filter limits, logging, and performance tuning options.
+
+## Configuration File Structure
+
+The configuration file has the following top-level sections:
+
+- `libpath`: Path to the plugin shared library
+- `log`: Logging configuration
+- `tokio`: Async runtime settings
+- `grpc`: gRPC server and filter configuration
+- `prometheus`: Metrics endpoint configuration
+
+## Complete Example
+
+Here's a complete configuration example from the source repository:
+
+```json
+{
+  "libpath": "../target/release/libyellowstone_grpc_geyser.so",
+  "log": {
+    "level": "info"
+  },
+  "tokio": {
+    "worker_threads": 8,
+    "affinity": "0-1,12-13"
+  },
+  "grpc": {
+    "address": "0.0.0.0:10000",
+    "tls_config": {
+      "cert_path": "",
+      "key_path": ""
+    },
+    "compression": {
+      "accept": ["gzip", "zstd"],
+      "send": ["gzip", "zstd"]
+    },
+    "server_http2_adaptive_window": null,
+    "server_http2_keepalive_interval": null,
+    "server_http2_keepalive_timeout": null,
+    "server_initial_connection_window_size": null,
+    "server_initial_stream_window_size": null,
+    "max_decoding_message_size": "4_194_304",
+    "snapshot_plugin_channel_capacity": null,
+    "snapshot_client_channel_capacity": "50_000_000",
+    "channel_capacity": "100_000",
+    "unary_concurrency_limit": 100,
+    "unary_disabled": false,
+    "x_token": null,
+    "replay_stored_slots": 0,
+    "filter_name_size_limit": 128,
+    "filter_names_size_limit": 4096,
+    "filter_names_cleanup_interval": "1s",
+    "filter_limits": {
+      "accounts": {
+        "max": 1,
+        "any": false,
+        "account_max": 10,
+        "account_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+        "owner_max": 10,
+        "owner_reject": ["11111111111111111111111111111111"],
+        "data_slice_max": 2
+      },
+      "slots": {
+        "max": 1
+      },
+      "transactions": {
+        "max": 1,
+        "any": false,
+        "account_include_max": 10,
+        "account_include_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+        "account_exclude_max": 10,
+        "account_required_max": 10
+      },
+      "transactions_status": {
+        "max": 1,
+        "any": false,
+        "account_include_max": 10,
+        "account_include_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+        "account_exclude_max": 10,
+        "account_required_max": 10
+      },
+      "blocks": {
+        "max": 1,
+        "account_include_max": 10,
+        "account_include_any": false,
+        "account_include_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+        "include_transactions": true,
+        "include_accounts": false,
+        "include_entries": false
+      },
+      "blocks_meta": {
+        "max": 1
+      },
+      "entries": {
+        "max": 1
+      }
+    }
+  },
+  "prometheus": {
+    "address": "0.0.0.0:8999"
+  }
+}
+```
+
+## Configuration Fields
+
+### Library Path
+
+```json
+"libpath": "../target/release/libyellowstone_grpc_geyser.so"
+```
+
+- **libpath** (string): Path to the compiled plugin shared library. Can be relative or absolute.
+
+### Logging
+
+```json
+"log": {
+  "level": "info"
+}
+```
+
+- **level** (string): Log level for the plugin. Options: `error`, `warn`, `info`, `debug`, `trace`
+
+### Tokio Runtime
+
+```json
+"tokio": {
+  "worker_threads": 8,
+  "affinity": "0-1,12-13"
+}
+```
+
+- **worker_threads** (number): Number of worker threads for the async runtime. Tune based on your CPU cores.
+- **affinity** (string): CPU affinity for worker threads. Format: `"core1-core2,core3-core4"`. Helps with performance isolation.
+
+### gRPC Server
+
+#### Basic Settings
+
+```json
+"grpc": {
+  "address": "0.0.0.0:10000"
+}
+```
+
+- **address** (string): Bind address and port for the gRPC server
+
+#### TLS Configuration
+
+```json
+"tls_config": {
+  "cert_path": "/path/to/cert.pem",
+  "key_path": "/path/to/key.pem"
+}
+```
+
+- **cert_path** (string): Path to TLS certificate file. Leave empty to disable TLS.
+- **key_path** (string): Path to TLS private key file. Leave empty to disable TLS.
+
+<Note>
+  When both `cert_path` and `key_path` are empty strings, the gRPC server runs without TLS encryption.
+</Note>
+
+#### Compression
+
+```json
+"compression": {
+  "accept": ["gzip", "zstd"],
+  "send": ["gzip", "zstd"]
+}
+```
+
+- **accept** (array): Compression algorithms accepted from clients. Options: `gzip`, `zstd`
+- **send** (array): Compression algorithms used for server responses. Options: `gzip`, `zstd`
+
+#### HTTP/2 Settings
+
+```json
+"server_http2_adaptive_window": null,
+"server_http2_keepalive_interval": null,
+"server_http2_keepalive_timeout": null,
+"server_initial_connection_window_size": null,
+"server_initial_stream_window_size": null
+```
+
+- **server_http2_adaptive_window** (number|null): Enable adaptive flow control window
+- **server_http2_keepalive_interval** (string|null): Interval for HTTP/2 keepalive pings (e.g., `"30s"`)
+- **server_http2_keepalive_timeout** (string|null): Timeout for keepalive pings (e.g., `"10s"`)
+- **server_initial_connection_window_size** (number|null): Initial HTTP/2 connection window size in bytes
+- **server_initial_stream_window_size** (number|null): Initial HTTP/2 stream window size in bytes
+
+<Note>
+  Set these to `null` to use default values. Adjust only if you experience connection issues.
+</Note>
+
+#### Channel Settings
+
+```json
+"max_decoding_message_size": "4_194_304",
+"snapshot_plugin_channel_capacity": null,
+"snapshot_client_channel_capacity": "50_000_000",
+"channel_capacity": "100_000"
+```
+
+- **max_decoding_message_size** (string): Maximum message size for decoding (in bytes). Uses underscore notation for readability.
+- **snapshot_plugin_channel_capacity** (string|null): Channel capacity for snapshot plugin messages
+- **snapshot_client_channel_capacity** (string): Channel capacity for snapshot client messages
+- **channel_capacity** (string): General channel capacity for message passing
+
+#### Unary Methods
+
+```json
+"unary_concurrency_limit": 100,
+"unary_disabled": false
+```
+
+- **unary_concurrency_limit** (number): Maximum concurrent unary RPC calls
+- **unary_disabled** (boolean): Disable unary methods (Ping, GetLatestBlockhash, GetBlockHeight, GetSlot, IsBlockhashValid, GetVersion)
+
+#### Authentication
+
+```json
+"x_token": null
+```
+
+- **x_token** (string|null): Authentication token for client requests. Set to `null` to disable authentication.
+
+<Warning>
+  If you enable authentication, clients must include the token in the `x-token` header with every request.
+</Warning>
+
+#### Replay Settings
+
+```json
+"replay_stored_slots": 0
+```
+
+- **replay_stored_slots** (number): Number of stored slots to replay on client connection. Set to `0` to disable replay.
+
+#### Filter Name Limits
+
+```json
+"filter_name_size_limit": 128,
+"filter_names_size_limit": 4096,
+"filter_names_cleanup_interval": "1s"
+```
+
+- **filter_name_size_limit** (number): Maximum size for a single filter name in bytes
+- **filter_names_size_limit** (number): Maximum total size for all filter names in bytes
+- **filter_names_cleanup_interval** (string): Interval for cleaning up expired filter names (e.g., `"1s"`, `"5s"`)
+
+### Filter Limits
+
+Filter limits control how clients can subscribe to data streams. These limits prevent abuse and ensure fair resource usage.
+
+#### Account Filters
+
+```json
+"accounts": {
+  "max": 1,
+  "any": false,
+  "account_max": 10,
+  "account_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+  "owner_max": 10,
+  "owner_reject": ["11111111111111111111111111111111"],
+  "data_slice_max": 2
+}
+```
+
+- **max** (number): Maximum number of account filters per subscription
+- **any** (boolean): Allow clients to subscribe to all accounts
+- **account_max** (number): Maximum number of specific accounts per filter
+- **account_reject** (array): List of account pubkeys that cannot be filtered
+- **owner_max** (number): Maximum number of owner pubkeys per filter
+- **owner_reject** (array): List of owner pubkeys that cannot be filtered
+- **data_slice_max** (number): Maximum number of data slices per filter
+
+#### Slot Filters
+
+```json
+"slots": {
+  "max": 1
+}
+```
+
+- **max** (number): Maximum number of slot filters per subscription
+
+#### Transaction Filters
+
+```json
+"transactions": {
+  "max": 1,
+  "any": false,
+  "account_include_max": 10,
+  "account_include_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+  "account_exclude_max": 10,
+  "account_required_max": 10
+}
+```
+
+- **max** (number): Maximum number of transaction filters per subscription
+- **any** (boolean): Allow clients to subscribe to all transactions
+- **account_include_max** (number): Maximum accounts in the include list
+- **account_include_reject** (array): Accounts that cannot be in the include list
+- **account_exclude_max** (number): Maximum accounts in the exclude list
+- **account_required_max** (number): Maximum accounts in the required list
+
+#### Transaction Status Filters
+
+```json
+"transactions_status": {
+  "max": 1,
+  "any": false,
+  "account_include_max": 10,
+  "account_include_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+  "account_exclude_max": 10,
+  "account_required_max": 10
+}
+```
+
+Same fields as transaction filters, but for transaction status updates.
+
+#### Block Filters
+
+```json
+"blocks": {
+  "max": 1,
+  "account_include_max": 10,
+  "account_include_any": false,
+  "account_include_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+  "include_transactions": true,
+  "include_accounts": false,
+  "include_entries": false
+}
+```
+
+- **max** (number): Maximum number of block filters per subscription
+- **account_include_max** (number): Maximum accounts in the include list
+- **account_include_any** (boolean): Allow subscribing to blocks with any account
+- **account_include_reject** (array): Accounts that cannot be in the include list
+- **include_transactions** (boolean): Whether to include transactions in blocks
+- **include_accounts** (boolean): Whether to include account updates in blocks
+- **include_entries** (boolean): Whether to include entries in blocks
+
+#### Block Meta Filters
+
+```json
+"blocks_meta": {
+  "max": 1
+}
+```
+
+- **max** (number): Maximum number of block metadata filters per subscription
+
+#### Entry Filters
+
+```json
+"entries": {
+  "max": 1
+}
+```
+
+- **max** (number): Maximum number of entry filters per subscription
+
+### Prometheus Metrics
+
+```json
+"prometheus": {
+  "address": "0.0.0.0:8999"
+}
+```
+
+- **address** (string): Bind address and port for the Prometheus metrics endpoint
+
+<Note>
+  The plugin exposes various metrics including `invalid_full_blocks_total` for monitoring block reconstruction failures.
+</Note>
+
+## Validation
+
+Before deploying your configuration, validate it using the config-check tool:
+
+```bash
+cargo run --bin config-check -- --config yellowstone-grpc-geyser/config.json
+```
+
+This ensures all fields are correctly formatted and values are within acceptable ranges.
+
+## Common Configurations
+
+### Development Setup
+
+```json
+{
+  "libpath": "../target/debug/libyellowstone_grpc_geyser.so",
+  "log": { "level": "debug" },
+  "grpc": {
+    "address": "127.0.0.1:10000",
+    "tls_config": { "cert_path": "", "key_path": "" }
+  }
+}
+```
+
+### Production Setup with TLS
+
+```json
+{
+  "libpath": "/opt/solana/geyser-plugins/libyellowstone_grpc_geyser.so",
+  "log": { "level": "info" },
+  "grpc": {
+    "address": "0.0.0.0:10000",
+    "tls_config": {
+      "cert_path": "/etc/ssl/certs/grpc-server.crt",
+      "key_path": "/etc/ssl/private/grpc-server.key"
+    },
+    "x_token": "your-secure-token-here"
+  }
+}
+```
+
+### High-Performance Setup
+
+```json
+{
+  "tokio": {
+    "worker_threads": 16,
+    "affinity": "0-7,16-23"
+  },
+  "grpc": {
+    "channel_capacity": "500_000",
+    "snapshot_client_channel_capacity": "100_000_000",
+    "unary_concurrency_limit": 500
+  }
+}
+```
+
+## Next Steps
+
+After configuring the plugin:
+
+1. [Deploy to validator](/plugin/deployment) - Integrate with your Solana validator
+2. Review the [Filters documentation](/guides/filtering) - Learn about data filtering options

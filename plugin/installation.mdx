@@ -1,0 +1,159 @@
+---
+title: 'Installation'
+description: 'Build and install the Yellowstone gRPC Geyser plugin'
+---
+
+## Overview
+
+The Yellowstone gRPC Geyser plugin is a shared library that integrates with Solana validators to stream real-time data over gRPC. This guide covers building and installing the plugin.
+
+## Prerequisites
+
+Before installing the plugin, ensure you have:
+
+- Rust toolchain (latest stable version)
+- Cargo build system
+- A Solana validator (Agave-based)
+- Linux operating system (recommended)
+
+## Building the Plugin
+
+<Steps>
+  <Step title="Clone the Repository">
+    Clone the Yellowstone gRPC repository:
+
+    ```bash
+    git clone https://github.com/rpcpool/yellowstone-grpc.git
+    cd yellowstone-grpc
+    ```
+  </Step>
+
+  <Step title="Build the Plugin">
+    Build the plugin as a shared library:
+
+    <CodeGroup>
+      ```bash Release Build (Recommended)
+      cargo build --release -p yellowstone-grpc-geyser
+      ```
+
+      ```bash Debug Build
+      cargo build -p yellowstone-grpc-geyser
+      ```
+    </CodeGroup>
+
+    The compiled plugin will be located at:
+    - Release: `target/release/libyellowstone_grpc_geyser.so`
+    - Debug: `target/debug/libyellowstone_grpc_geyser.so`
+  </Step>
+
+  <Step title="Verify the Build">
+    Check that the shared library was created successfully:
+
+    ```bash
+    ls -lh target/release/libyellowstone_grpc_geyser.so
+    ```
+
+    You should see the `.so` file with a size typically in the range of several megabytes.
+  </Step>
+
+  <Step title="Validate Configuration">
+    Before deploying, validate your configuration file:
+
+    ```bash
+    cargo run --bin config-check -- --config yellowstone-grpc-geyser/config.json
+    ```
+
+    This ensures your configuration is valid before starting the validator.
+  </Step>
+</Steps>
+
+## Installation Paths
+
+You have two options for organizing the plugin files:
+
+### Option 1: Relative Path (Development)
+
+Keep the plugin in the build directory and reference it relatively in your config:
+
+```json
+{
+  "libpath": "../target/release/libyellowstone_grpc_geyser.so"
+}
+```
+
+This is useful for development and testing.
+
+### Option 2: Absolute Path (Production)
+
+Copy the plugin to a dedicated location:
+
+```bash
+sudo mkdir -p /opt/solana/geyser-plugins
+sudo cp target/release/libyellowstone_grpc_geyser.so /opt/solana/geyser-plugins/
+```
+
+Then reference it with an absolute path:
+
+```json
+{
+  "libpath": "/opt/solana/geyser-plugins/libyellowstone_grpc_geyser.so"
+}
+```
+
+This approach is recommended for production deployments.
+
+## Dependencies
+
+The plugin has the following key dependencies (from `Cargo.toml`):
+
+### Core Dependencies
+
+- **agave-geyser-plugin-interface**: Interface to Solana's Geyser plugin system
+- **tonic**: gRPC framework with support for gzip, zstd, and TLS
+- **tokio**: Async runtime with multi-threading support
+- **yellowstone-grpc-proto**: Protocol definitions for Yellowstone gRPC
+
+### Solana SDK Dependencies
+
+- solana-account
+- solana-account-decoder
+- solana-transaction
+- solana-transaction-status
+- solana-pubkey
+- And other Solana SDK components
+
+## Crate Type
+
+The plugin is built as both:
+- **cdylib**: C-compatible dynamic library for use with Solana validator
+- **rlib**: Rust library for integration in other Rust projects
+
+## Next Steps
+
+After building and installing the plugin:
+
+1. [Configure the plugin](/plugin/configuration) - Set up gRPC endpoints, filters, and limits
+2. [Deploy to validator](/plugin/deployment) - Integrate with your Solana validator
+
+## Troubleshooting
+
+### Build Fails
+
+If the build fails, ensure you have the latest Rust toolchain:
+
+```bash
+rustup update stable
+```
+
+### Missing Dependencies
+
+If you encounter missing system dependencies, install the build essentials:
+
+```bash
+sudo apt-get update
+sudo apt-get install build-essential pkg-config libssl-dev
+```
+
+### Version Compatibility
+
+Ensure your Solana validator version is compatible with the plugin. The plugin is designed for Agave-based validators and uses the `agave-geyser-plugin-interface`.

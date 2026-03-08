@@ -1,0 +1,475 @@
+---
+title: "SubscribeDeshred"
+description: "Subscribe to pre-execution transaction data as it's deshredded from network shreds"
+---
+
+## Overview
+
+The `SubscribeDeshred` method subscribes to deshred transaction updates, which are transactions received BEFORE execution. These transactions are emitted when entries are formed from network shreds, before any execution or status metadata is available.
+
+```proto
+rpc SubscribeDeshred(stream SubscribeDeshredRequest) returns (stream SubscribeUpdateDeshred) {}
+```
+
+## What are Deshred Transactions?
+
+Deshred transactions represent the earliest possible point to observe transactions in the Solana validator:
+
+- **Pre-execution**: Transactions are captured when shreds are assembled into entries, before any execution occurs
+- **No execution metadata**: `TransactionStatusMeta` is not available (no logs, compute units, or error information)
+- **Address lookup tables resolved**: Both static account keys and dynamically loaded addresses from ALTs are available for filtering
+- **Earliest signal**: Get the fastest possible notification that a transaction has been received by the validator
+
+## Use Cases
+
+<CardGroup cols={2}>
+  <Card title="MEV Detection" icon="chart-line">
+    Monitor transaction flow before execution to detect MEV opportunities or sandwich attacks.
+  </Card>
+  <Card title="Latency-Critical Apps" icon="gauge-high">
+    React to transactions with minimal latency, before execution completes.
+  </Card>
+  <Card title="Transaction Analysis" icon="magnifying-glass-chart">
+    Analyze transaction patterns and account interactions before results are known.
+  </Card>
+  <Card title="Front-Running Detection" icon="shield">
+    Detect potential front-running attempts by observing transaction order before execution.
+  </Card>
+</CardGroup>
+
+## SubscribeDeshredRequest
+
+The request message defines filters for deshred transactions.
+
+<ParamField path="deshred_transactions" type="map<string, SubscribeRequestFilterDeshredTransactions>">
+  Map of deshred transaction filters. Key is a user-defined filter name, value contains filter criteria.
+</ParamField>
+
+<ParamField path="ping" type="SubscribeRequestPing" optional>
+  Send a ping request. Server will respond with a pong message containing the same ID.
+</ParamField>
+
+### Deshred Transaction Filters
+
+<ParamField path="vote" type="bool" optional>
+  Filter vote transactions. Set to false to exclude vote transactions (recommended for most use cases).
+</ParamField>
+
+<ParamField path="account_include" type="string[]">
+  List of account public keys. Receive transactions that mention any of these accounts in either static keys or ALT-loaded addresses.
+</ParamField>
+
+<ParamField path="account_exclude" type="string[]">
+  List of account public keys. Exclude transactions that mention any of these accounts.
+</ParamField>
+
+<ParamField path="account_required" type="string[]">
+  List of account public keys. Receive transactions that mention ALL of these accounts (static or ALT-loaded).
+</ParamField>
+
+## SubscribeUpdateDeshred
+
+The server responds with a stream of deshred update messages.
+
+<ResponseField name="filters" type="string[]">
+  Names of the filters that matched this update.
+</ResponseField>
+
+<ResponseField name="update_oneof" type="oneof">
+  One of the following update types:
+  
+  - `deshred_transaction`: Pre-execution transaction data
+  - `ping`: Server-initiated ping for keepalive
+  - `pong`: Response to client ping
+</ResponseField>
+
+<ResponseField name="created_at" type="google.protobuf.Timestamp">
+  Timestamp when the update was created on the server.
+</ResponseField>
+
+### Deshred Transaction Update
+
+<ResponseField name="transaction.signature" type="bytes">
+  Transaction signature (64 bytes).
+</ResponseField>
+
+<ResponseField name="transaction.is_vote" type="bool">
+  Whether this is a vote transaction.
+</ResponseField>
+
+<ResponseField name="transaction.transaction" type="solana.storage.ConfirmedBlock.Transaction">
+  Full transaction data including message, signatures, and account keys. Note: `meta` field is not populated for deshred transactions.
+</ResponseField>
+
+<ResponseField name="transaction.loaded_writable_addresses" type="bytes[]">
+  Account addresses loaded from address lookup tables with writable permissions. These addresses are resolved and available for filtering.
+</ResponseField>
+
+<ResponseField name="transaction.loaded_readonly_addresses" type="bytes[]">
+  Account addresses loaded from address lookup tables with read-only permissions. These addresses are resolved and available for filtering.
+</ResponseField>
+
+<ResponseField name="slot" type="uint64">
+  Slot number where this transaction was deshredded.
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+
+```rust Rust
+use yellowstone_grpc_client::GeyserGrpcClient;
+use yellowstone_grpc_proto::prelude::{
+    SubscribeDeshredRequest,
+    SubscribeRequestFilterDeshredTransactions,
+};
+use futures::stream::StreamExt;
+use std::collections::HashMap;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Connect to the gRPC endpoint
+    let mut client = GeyserGrpcClient::build_from_shared("http://127.0.0.1:10000")?
+        .x_token(Some("your-token-here"))?
+        .connect()
+        .await?;
+
+    // Create deshred subscription request
+    let mut deshred_transactions = HashMap::new();
+    deshred_transactions.insert(
+        "raydium_swaps".to_string(),
+        SubscribeRequestFilterDeshredTransactions {
+            vote: Some(false),
+            account_include: vec![
+                "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8".to_string(), // Raydium AMM program
+            ],
+            account_exclude: vec![],
+            account_required: vec![],
+        },
+    );
+
+    let request = SubscribeDeshredRequest {
+        deshred_transactions,
+        ping: None,
+    };
+
+    // Subscribe and receive deshred updates
+    let (mut subscribe_tx, mut stream) = client
+        .subscribe_deshred_with_request(Some(request))
+        .await?;
+
+    println!("Deshred subscription started, receiving pre-execution transactions...");
+    
+    while let Some(message) = stream.next().await {
+        match message {
+            Ok(msg) => {
+                if let Some(update) = msg.update_oneof {
+                    match update {
+                        SubscribeUpdateDeshred::DeshredTransaction(tx_update) => {
+                            let tx = tx_update.transaction.unwrap();
+                            println!("Deshred transaction at slot {}:", tx_update.slot);
+                            println!("  Signature: {:?}", tx.signature);
+                            println!("  Is vote: {}", tx.is_vote);
+                            println!("  Loaded writable addresses: {}", 
+                                tx.loaded_writable_addresses.len());
+                            println!("  Loaded readonly addresses: {}", 
+                                tx.loaded_readonly_addresses.len());
+                        }
+                        SubscribeUpdateDeshred::Ping(_) => {
+                            // Respond to ping to keep connection alive
+                            subscribe_tx.send(SubscribeDeshredRequest {
+                                ping: Some(SubscribeRequestPing { id: 1 }),
+                                ..Default::default()
+                            }).await?;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Err(error) => {
+                eprintln!("Error: {:?}", error);
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+```
+
+```typescript TypeScript
+import Client from "@triton-one/yellowstone-grpc";
+
+async function subscribeToDeshred() {
+  // Connect to the gRPC endpoint
+  const client = new Client(
+    "http://127.0.0.1:10000",
+    "your-token-here",
+    {
+      grpcMaxDecodingMessageSize: 64 * 1024 * 1024,
+    }
+  );
+
+  await client.connect();
+
+  // Create deshred subscription stream
+  const stream = await client.subscribeDeshred();
+
+  // Handle stream events
+  stream.on("data", (data) => {
+    console.log("Received deshred update:", data.filters);
+    
+    if (data.deshredTransaction) {
+      const tx = data.deshredTransaction;
+      console.log("Pre-execution transaction:", {
+        slot: tx.slot,
+        signature: tx.transaction.signature.toString("hex"),
+        isVote: tx.transaction.isVote,
+        loadedWritableCount: tx.transaction.loadedWritableAddresses.length,
+        loadedReadonlyCount: tx.transaction.loadedReadonlyAddresses.length,
+      });
+      
+      // Transaction is received before execution
+      // No meta field available (logs, compute units, etc.)
+    }
+  });
+
+  stream.on("error", (error) => {
+    console.error("Stream error:", error);
+    stream.end();
+  });
+
+  stream.on("end", () => {
+    console.log("Stream ended");
+  });
+
+  // Send deshred subscription request
+  const request = {
+    deshredTransactions: {
+      raydium_swaps: {
+        vote: false,
+        accountInclude: [
+          "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8", // Raydium AMM
+        ],
+        accountExclude: [],
+        accountRequired: [],
+      },
+    },
+    ping: undefined,
+  };
+
+  await new Promise<void>((resolve, reject) => {
+    stream.write(request, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+
+  console.log("Deshred subscription sent...");
+}
+
+subscribeToDeshred().catch(console.error);
+```
+
+```python Python
+import grpc
+import geyser_pb2
+import geyser_pb2_grpc
+
+def subscribe_to_deshred():
+    # Set up authentication
+    x_token = "your-token-here"
+    call_creds = grpc.access_token_call_credentials(x_token)
+    ssl_creds = grpc.ssl_channel_credentials()
+    combined_creds = grpc.composite_channel_credentials(ssl_creds, call_creds)
+    
+    # Connect to the gRPC endpoint
+    channel = grpc.secure_channel(
+        "127.0.0.1:10000",
+        credentials=combined_creds
+    )
+    stub = geyser_pb2_grpc.GeyserStub(channel)
+    
+    # Create deshred subscription request
+    request = geyser_pb2.SubscribeDeshredRequest(
+        deshred_transactions={
+            "raydium_swaps": geyser_pb2.SubscribeRequestFilterDeshredTransactions(
+                vote=False,
+                account_include=["675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"]
+            )
+        }
+    )
+    
+    # Subscribe and receive deshred updates
+    def request_generator():
+        yield request
+    
+    responses = stub.SubscribeDeshred(request_generator())
+    
+    print("Deshred subscription started...")
+    for response in responses:
+        print(f"Received deshred update: filters={response.filters}")
+        
+        if response.HasField("deshred_transaction"):
+            tx = response.deshred_transaction.transaction
+            print(f"Pre-execution transaction:")
+            print(f"  Slot: {response.deshred_transaction.slot}")
+            print(f"  Signature: {tx.signature.hex()}")
+            print(f"  Is vote: {tx.is_vote}")
+            print(f"  Loaded writable: {len(tx.loaded_writable_addresses)}")
+            print(f"  Loaded readonly: {len(tx.loaded_readonly_addresses)}")
+
+if __name__ == "__main__":
+    subscribe_to_deshred()
+```
+
+```go Go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    
+    pb "github.com/rpcpool/yellowstone-grpc/examples/golang/proto"
+    "google.golang.org/grpc"
+    "google.golang.org/grpc/credentials"
+    "google.golang.org/grpc/metadata"
+)
+
+func main() {
+    // Set up connection
+    creds := credentials.NewClientTLSFromCert(nil, "")
+    conn, err := grpc.Dial(
+        "127.0.0.1:10000",
+        grpc.WithTransportCredentials(creds),
+    )
+    if err != nil {
+        log.Fatalf("Failed to connect: %v", err)
+    }
+    defer conn.Close()
+    
+    // Add authentication token
+    ctx := metadata.AppendToOutgoingContext(
+        context.Background(),
+        "x-token", "your-token-here",
+    )
+    
+    client := pb.NewGeyserClient(conn)
+    
+    // Create deshred subscription
+    stream, err := client.SubscribeDeshred(ctx)
+    if err != nil {
+        log.Fatalf("Failed to subscribe: %v", err)
+    }
+    
+    // Send deshred subscription request
+    request := &pb.SubscribeDeshredRequest{
+        DeshredTransactions: map[string]*pb.SubscribeRequestFilterDeshredTransactions{
+            "raydium_swaps": {
+                Vote: boolPtr(false),
+                AccountInclude: []string{
+                    "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8",
+                },
+            },
+        },
+    }
+    
+    if err := stream.Send(request); err != nil {
+        log.Fatalf("Failed to send request: %v", err)
+    }
+    
+    fmt.Println("Deshred subscription started...")
+    
+    // Receive deshred updates
+    for {
+        update, err := stream.Recv()
+        if err != nil {
+            log.Fatalf("Error receiving update: %v", err)
+        }
+        
+        fmt.Printf("Received deshred update: filters=%v\n", update.Filters)
+        
+        switch u := update.UpdateOneof.(type) {
+        case *pb.SubscribeUpdateDeshred_DeshredTransaction:
+            tx := u.DeshredTransaction
+            fmt.Printf("Pre-execution transaction:\n")
+            fmt.Printf("  Slot: %d\n", tx.Slot)
+            fmt.Printf("  Signature: %x\n", tx.Transaction.Signature)
+            fmt.Printf("  Is vote: %v\n", tx.Transaction.IsVote)
+            fmt.Printf("  Loaded writable: %d\n", 
+                len(tx.Transaction.LoadedWritableAddresses))
+            fmt.Printf("  Loaded readonly: %d\n", 
+                len(tx.Transaction.LoadedReadonlyAddresses))
+        }
+    }
+}
+
+func boolPtr(b bool) *bool {
+    return &b
+}
+```
+
+</CodeGroup>
+
+## Key Differences from Subscribe
+
+<AccordionGroup>
+  <Accordion title="Timing">
+    `SubscribeDeshred` provides transaction data at the earliest possible point - when shreds are assembled into entries, before execution. Regular `Subscribe` transactions include execution results.
+  </Accordion>
+  
+  <Accordion title="Metadata Availability">
+    Deshred transactions do NOT include `TransactionStatusMeta`, so there are no logs, compute units consumed, error information, or account state changes. You only get the raw transaction data.
+  </Accordion>
+  
+  <Accordion title="Address Lookup Tables">
+    ALT addresses are fully resolved and available for filtering in deshred transactions. This makes filtering by program interactions reliable even with versioned transactions.
+  </Accordion>
+  
+  <Accordion title="Use Case Focus">
+    Deshred is optimized for latency-sensitive applications that need to react before execution completes, such as MEV detection or transaction ordering analysis.
+  </Accordion>
+</AccordionGroup>
+
+## Filtering by ALT-Loaded Addresses
+
+One powerful feature of deshred transactions is that address lookup table (ALT) addresses are resolved and available for filtering:
+
+```rust
+// Filter for transactions that interact with a specific program,
+// even if that program is referenced through an ALT
+let deshred_filter = SubscribeRequestFilterDeshredTransactions {
+    vote: Some(false),
+    account_include: vec![
+        "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4".to_string(), // Jupiter program
+    ],
+    ..Default::default()
+};
+```
+
+This will match transactions where Jupiter is referenced in:
+- Static account keys (regular transaction accounts)
+- Loaded writable addresses (from ALTs)
+- Loaded readonly addresses (from ALTs)
+
+## Latency Considerations
+
+Deshred transactions provide the lowest latency signal:
+
+1. **Network shreds received** → Shreds arrive at validator from the network
+2. **Entry assembled** → Shreds are assembled into an entry
+3. **🔔 Deshred transaction emitted** ← You are here (SubscribeDeshred)
+4. **Transaction executed** → Validator executes the transaction
+5. **Regular transaction emitted** ← Regular Subscribe sees it here
+
+The time difference between steps 3 and 5 can be significant, especially for complex transactions or during high network load.
+
+## Best Practices
+
+- **Filter out votes**: Always set `vote: false` unless you specifically need vote transactions
+- **Use specific account filters**: Deshred can produce high volumes; filter to reduce bandwidth
+- **Don't expect execution results**: Remember that deshred transactions haven't executed yet
+- **Handle duplicates**: You may see the same transaction in both SubscribeDeshred and Subscribe
+- **Combine with regular Subscribe**: Use deshred for early signals, then correlate with executed transactions
+- **Monitor memory**: Buffer deshred transactions carefully if storing them for later correlation

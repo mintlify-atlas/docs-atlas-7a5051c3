@@ -1,0 +1,337 @@
+---
+title: 'Filter Limits'
+description: 'Configuration options for limiting subscription filters'
+---
+
+## Overview
+
+Filter limits allow you to control and restrict what clients can subscribe to via the gRPC interface. This is essential for protecting your validator from resource exhaustion and preventing abuse by limiting the scope of subscriptions.
+
+<Warning>
+If the `filter_limits` field is omitted from your configuration, filters will have no limits by default. This means clients can subscribe to unlimited data, which may overwhelm your server.
+</Warning>
+
+## Configuration Structure
+
+Filter limits are configured under `grpc.filter_limits` in your configuration file. Each subscription type (accounts, transactions, slots, etc.) has its own set of limits.
+
+```json
+"grpc": {
+  "filter_limits": {
+    "accounts": { /* account limits */ },
+    "slots": { /* slot limits */ },
+    "transactions": { /* transaction limits */ },
+    "transactions_status": { /* transaction status limits */ },
+    "blocks": { /* block limits */ },
+    "blocks_meta": { /* block meta limits */ },
+    "entries": { /* entry limits */ }
+  }
+}
+```
+
+## Account Filter Limits
+
+<ParamField path="accounts.max" type="number" default="unlimited">
+  Maximum number of account filters allowed per subscription request.
+  
+  When set to `1`, clients can only have one account filter active at a time. This is useful for enforcing strict resource limits.
+</ParamField>
+
+<ParamField path="accounts.any" type="boolean" default={true}>
+  Allow subscribing to all accounts without any filters.
+  
+  When set to `false`, clients must specify at least one filter criterion (account pubkey, owner, or data filter). This prevents subscriptions to the entire account state.
+  
+  <Warning>
+    Setting `any: false` is highly recommended for production environments to prevent clients from subscribing to all account updates.
+  </Warning>
+</ParamField>
+
+<ParamField path="accounts.account_max" type="number" default="unlimited">
+  Maximum number of account pubkeys that can be specified in a single filter's `account` array.
+  
+  Example: With `account_max: 10`, a client can filter up to 10 specific account addresses.
+</ParamField>
+
+<ParamField path="accounts.account_reject" type="array">
+  Array of account pubkeys that are explicitly forbidden in filters.
+  
+  Useful for blocking subscriptions to high-traffic accounts like the Token Program:
+  
+  ```json
+  "account_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"]
+  ```
+</ParamField>
+
+<ParamField path="accounts.owner_max" type="number" default="unlimited">
+  Maximum number of owner pubkeys that can be specified in a single filter's `owner` array.
+  
+  Example: With `owner_max: 10`, a client can filter accounts by up to 10 different program owners.
+</ParamField>
+
+<ParamField path="accounts.owner_reject" type="array">
+  Array of owner pubkeys that are explicitly forbidden in filters.
+  
+  Useful for blocking subscriptions to all accounts owned by system programs:
+  
+  ```json
+  "owner_reject": ["11111111111111111111111111111111"]
+  ```
+  
+  This prevents clients from subscribing to all System Program accounts.
+</ParamField>
+
+<ParamField path="accounts.data_slice_max" type="number" default="unlimited">
+  Maximum number of data slices that can be requested in the `accounts_data_slice` array.
+  
+  Data slices allow clients to receive only specific portions of account data, reducing bandwidth usage.
+</ParamField>
+
+## Slot Filter Limits
+
+<ParamField path="slots.max" type="number" default="unlimited">
+  Maximum number of slot filters allowed per subscription request.
+  
+  Slots are generally low-overhead, so this is often set to `1` to allow slot subscriptions while keeping them simple.
+  
+  ```json
+  "slots": {
+    "max": 1
+  }
+  ```
+</ParamField>
+
+## Transaction Filter Limits
+
+<ParamField path="transactions.max" type="number" default="unlimited">
+  Maximum number of transaction filters allowed per subscription request.
+</ParamField>
+
+<ParamField path="transactions.any" type="boolean" default={true}>
+  Allow subscribing to all transactions without any filters.
+  
+  When set to `false`, clients must specify at least one filter criterion. Highly recommended for production.
+  
+  <Warning>
+    Subscribing to all transactions can generate massive amounts of data. Set `any: false` unless you specifically need to allow this.
+  </Warning>
+</ParamField>
+
+<ParamField path="transactions.account_include_max" type="number" default="unlimited">
+  Maximum number of accounts in the `account_include` filter array.
+  
+  The `account_include` filter matches transactions that use **any** account from the list (logical OR).
+</ParamField>
+
+<ParamField path="transactions.account_include_reject" type="array">
+  Array of account pubkeys forbidden in `account_include` filters.
+  
+  Prevents subscriptions to transactions involving specific high-traffic accounts:
+  
+  ```json
+  "account_include_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"]
+  ```
+</ParamField>
+
+<ParamField path="transactions.account_exclude_max" type="number" default="unlimited">
+  Maximum number of accounts in the `account_exclude` filter array.
+  
+  The `account_exclude` filter matches transactions that do **not** use any account from the list.
+</ParamField>
+
+<ParamField path="transactions.account_required_max" type="number" default="unlimited">
+  Maximum number of accounts in the `account_required` filter array.
+  
+  The `account_required` filter matches transactions that use **all** accounts from the list (logical AND).
+</ParamField>
+
+## Transaction Status Filter Limits
+
+Transaction status filters use the same structure as transaction filters:
+
+```json
+"transactions_status": {
+  "max": 1,
+  "any": false,
+  "account_include_max": 10,
+  "account_include_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+  "account_exclude_max": 10,
+  "account_required_max": 10
+}
+```
+
+These limits apply to transaction status subscriptions, which provide information about transaction confirmation status.
+
+## Block Filter Limits
+
+<ParamField path="blocks.max" type="number" default="unlimited">
+  Maximum number of block filters allowed per subscription request.
+</ParamField>
+
+<ParamField path="blocks.account_include_max" type="number" default="unlimited">
+  Maximum number of accounts in the `account_include` filter array for blocks.
+  
+  This filters both transactions and account updates within blocks that involve any of the specified accounts.
+</ParamField>
+
+<ParamField path="blocks.account_include_any" type="boolean" default={true}>
+  Allow subscribing to all blocks without account filtering.
+  
+  When set to `false`, clients must specify at least one account in the `account_include` filter.
+</ParamField>
+
+<ParamField path="blocks.account_include_reject" type="array">
+  Array of account pubkeys forbidden in block `account_include` filters.
+  
+  ```json
+  "account_include_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"]
+  ```
+</ParamField>
+
+<ParamField path="blocks.include_transactions" type="boolean" default={true}>
+  Control whether clients can request transaction data in block subscriptions.
+  
+  Setting to `false` forces clients to receive blocks without transaction details, reducing data volume.
+</ParamField>
+
+<ParamField path="blocks.include_accounts" type="boolean" default={true}>
+  Control whether clients can request account update data in block subscriptions.
+  
+  Setting to `false` prevents clients from receiving account updates within blocks.
+</ParamField>
+
+<ParamField path="blocks.include_entries" type="boolean" default={true}>
+  Control whether clients can request entry data in block subscriptions.
+  
+  Setting to `false` prevents clients from receiving entries within blocks.
+</ParamField>
+
+## Block Meta Filter Limits
+
+<ParamField path="blocks_meta.max" type="number" default="unlimited">
+  Maximum number of block metadata filters allowed per subscription request.
+  
+  Block meta subscriptions provide block information without transactions, accounts, or entries.
+  
+  ```json
+  "blocks_meta": {
+    "max": 1
+  }
+  ```
+</ParamField>
+
+## Entry Filter Limits
+
+<ParamField path="entries.max" type="number" default="unlimited">
+  Maximum number of entry filters allowed per subscription request.
+  
+  Entries are typically low-overhead, so this is often set to `1`:
+  
+  ```json
+  "entries": {
+    "max": 1
+  }
+  ```
+</ParamField>
+
+## Complete Example
+
+Here's a production-ready filter limits configuration:
+
+```json
+{
+  "grpc": {
+    "filter_limits": {
+      "accounts": {
+        "max": 1,
+        "any": false,
+        "account_max": 10,
+        "account_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+        "owner_max": 10,
+        "owner_reject": ["11111111111111111111111111111111"],
+        "data_slice_max": 2
+      },
+      "slots": {
+        "max": 1
+      },
+      "transactions": {
+        "max": 1,
+        "any": false,
+        "account_include_max": 10,
+        "account_include_reject": [
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        ],
+        "account_exclude_max": 10,
+        "account_required_max": 10
+      },
+      "transactions_status": {
+        "max": 1,
+        "any": false,
+        "account_include_max": 10,
+        "account_include_reject": [
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        ],
+        "account_exclude_max": 10,
+        "account_required_max": 10
+      },
+      "blocks": {
+        "max": 1,
+        "account_include_max": 10,
+        "account_include_any": false,
+        "account_include_reject": [
+          "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        ],
+        "include_transactions": true,
+        "include_accounts": false,
+        "include_entries": false
+      },
+      "blocks_meta": {
+        "max": 1
+      },
+      "entries": {
+        "max": 1
+      }
+    }
+  }
+}
+```
+
+## Best Practices
+
+### Protection Against Abuse
+
+1. **Always set `any: false`** for accounts, transactions, and blocks to prevent clients from subscribing to all data
+2. **Use reject lists** to block high-traffic accounts like the Token Program (`TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`)
+3. **Set reasonable max values** (typically 1-10) to prevent filter explosion
+
+### Resource Management
+
+<Warning>
+High-traffic accounts and system programs can generate enormous amounts of data. Always use reject lists to block these in production:
+
+- Token Program: `TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA`
+- System Program: `11111111111111111111111111111111`
+</Warning>
+
+### Testing Configuration
+
+1. Start with very restrictive limits
+2. Monitor metrics on the Prometheus endpoint
+3. Gradually adjust limits based on actual usage patterns
+4. Use the `debug_clients_http` endpoint to inspect active subscriptions
+
+### When Limits Are Exceeded
+
+When a client attempts to create a subscription that exceeds configured limits, they will receive an error response:
+
+- `Max amount of filters/data_slices reached, only {max} allowed`
+- `Subscribe on full stream with 'any' is not allowed, at least one filter required`
+- `Max amount of Pubkeys reached, only {max} allowed`
+- `Pubkey {pubkey} in filters is not allowed`
+
+Ensure your client applications handle these errors gracefully and request appropriate filter configurations.
+
+## Related
+
+- [Configuration Schema](/api/config-schema) - Complete configuration reference
+- [Subscribe Method](/api/subscribe) - Learn about subscription filters

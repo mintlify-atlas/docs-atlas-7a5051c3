@@ -1,0 +1,566 @@
+---
+title: 'Troubleshooting'
+description: 'Common issues and solutions for Yellowstone gRPC'
+---
+
+## Known Issues
+
+### Block Reconstruction Missing Entries
+
+<Warning>
+  **Critical Issue**: Block reconstruction inside the gRPC plugin is based on information provided by BlockMeta. Unfortunately, the number of entries for blocks generated on validators is always equal to zero. These blocks will always have zero entries.
+</Warning>
+
+**Issue**: Blocks reconstructed on validators have zero entries due to a Solana limitation.
+
+**GitHub Issue**: https://github.com/solana-labs/solana/issues/33823
+
+**Impact**:
+- Blocks will have `entries` field empty or zero
+- This only affects blocks generated on validators
+- Account updates and transactions are not affected
+
+**Workaround**:
+- Use RPC methods to fetch entries separately if needed
+- Subscribe to entries separately using the entries filter
+- Monitor `invalid_full_blocks_total` metric to track reconstruction failures
+
+**Configuration**:
+
+By default, invalid block reconstruction logs an error and increments metrics. You can change this to panic:
+
+```json
+{
+  "grpc": {
+    "block_fail_action": "panic"
+  }
+}
+```
+
+<Note>
+  Setting `block_fail_action` to `panic` will crash the plugin on block reconstruction failure. Only use this in development or testing environments.
+</Note>
+
+## Connection Issues
+
+<Accordion title="Connection refused or timeout">
+  **Symptoms**:
+  - Unable to connect to gRPC endpoint
+  - Connection timeout errors
+  - "Connection refused" messages
+
+  **Solutions**:
+
+  1. **Verify the plugin is running**:
+     ```bash
+     # Check if the port is listening
+     netstat -tlnp | grep 10000
+     
+     # Or using ss
+     ss -tlnp | grep 10000
+     ```
+
+  2. **Check configuration**:
+     - Verify `grpc.address` in config.json
+     - Ensure the address format is correct (e.g., "0.0.0.0:10000")
+     - Check that validator loaded the plugin correctly
+
+  3. **Firewall rules**:
+     ```bash
+     # Check if firewall is blocking the port
+     sudo iptables -L -n | grep 10000
+     
+     # Allow the port (example)
+     sudo iptables -A INPUT -p tcp --dport 10000 -j ACCEPT
+     ```
+
+  4. **Check validator logs**:
+     ```bash
+     # Look for plugin loading errors
+     tail -f /path/to/validator.log | grep -i geyser
+     ```
+</Accordion>
+
+<Accordion title="Connection drops or intermittent disconnects">
+  **Symptoms**:
+  - Clients disconnect randomly
+  - Stream interrupted errors
+  - High `grpc_client_disconnects_total` metric
+
+  **Solutions**:
+
+  1. **Enable keepalive** for load balancers:
+     ```json
+     {
+       "grpc": {
+         "server_http2_keepalive_interval": "30s",
+         "server_http2_keepalive_timeout": "10s"
+       }
+     }
+     ```
+
+  2. **Client-side ping** (required for some cloud providers):
+     ```javascript
+     // Send periodic ping to keep connection alive
+     setInterval(() => {
+       client.subscribe({ ping: true });
+     }, 30000);
+     ```
+
+  3. **Check queue capacity**:
+     - Monitor `grpc_subscriber_queue_size` metric
+     - Increase `channel_capacity` if queues are full
+
+  4. **Network MTU issues**:
+     - Try reducing `max_decoding_message_size`
+     - Enable compression to reduce packet sizes
+</Accordion>
+
+<Accordion title="TLS/SSL connection errors">
+  **Symptoms**:
+  - SSL handshake failed
+  - Certificate verification errors
+  - "Transport error" messages
+
+  **Solutions**:
+
+  1. **Verify TLS configuration**:
+     ```json
+     {
+       "grpc": {
+         "tls_config": {
+           "cert_path": "/path/to/cert.pem",
+           "key_path": "/path/to/key.pem"
+         }
+       }
+     }
+     ```
+
+  2. **Check certificate files**:
+     ```bash
+     # Verify certificate is valid
+     openssl x509 -in /path/to/cert.pem -text -noout
+     
+     # Check certificate and key match
+     openssl x509 -noout -modulus -in cert.pem | openssl md5
+     openssl rsa -noout -modulus -in key.pem | openssl md5
+     ```
+
+  3. **Client certificate verification**:
+     - Ensure client trusts the server certificate
+     - Use proper CA certificates
+     - Update client TLS configuration
+</Accordion>
+
+## Filter and Subscription Issues
+
+<Accordion title="Filter limits exceeded">
+  **Symptoms**:
+  - "Filter limit exceeded" errors
+  - Subscription rejected
+  - High `yellowstone_grpc_subscription_limit_exceeded_total` metric
+
+  **Solutions**:
+
+  1. **Review filter limits** in config.json:
+     ```json
+     {
+       "grpc": {
+         "filter_limits": {
+           "accounts": {
+             "max": 1,
+             "account_max": 10,
+             "owner_max": 10
+           },
+           "transactions": {
+             "max": 1,
+             "account_include_max": 10
+           }
+         }
+       }
+     }
+     ```
+
+  2. **Adjust limits** based on your use case:
+     - Increase `max` for more concurrent filters
+     - Increase `account_max` for more accounts per filter
+     - Remove or increase limits for trusted clients
+
+  3. **Check rejected addresses**:
+     ```json
+     {
+       "filter_limits": {
+         "accounts": {
+           "account_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"]
+         }
+       }
+     }
+     ```
+     Remove addresses from reject lists if needed.
+
+  4. **Monitor subscription usage**:
+     ```promql
+     subscriptions_total{endpoint="subscribe"}
+     ```
+</Accordion>
+
+<Accordion title="No data received from subscription">
+  **Symptoms**:
+  - Subscription succeeds but no messages arrive
+  - Empty stream
+  - Only heartbeat/ping messages received
+
+  **Solutions**:
+
+  1. **Verify filter configuration**:
+     - Check account addresses are correct
+     - Ensure commitment level matches your needs
+     - Verify account/owner filters aren't too restrictive
+
+  2. **Test with broader filter**:
+     ```javascript
+     // Subscribe to all accounts (for testing)
+     client.subscribe({
+       accounts: { "test": {} },
+       commitment: "processed"
+     });
+     ```
+
+  3. **Check slot status**:
+     ```promql
+     slot_status{status="processed"}
+     ```
+     Ensure slots are being received from Geyser.
+
+  4. **Verify validator is processing transactions**:
+     - Check validator logs
+     - Verify the validator is not delinquent
+     - Ensure Geyser plugin is properly loaded
+</Accordion>
+
+<Accordion title="Slow or delayed data">
+  **Symptoms**:
+  - Significant lag between slot time and data arrival
+  - High `slot_status` vs `slot_status_plugin` difference
+  - Slow message processing
+
+  **Solutions**:
+
+  1. **Check message queue size**:
+     ```promql
+     message_queue_size
+     ```
+     If high (>10,000), increase processing capacity.
+
+  2. **Increase Tokio worker threads**:
+     ```json
+     {
+       "tokio": {
+         "worker_threads": 16
+       }
+     }
+     ```
+
+  3. **Increase channel capacity**:
+     ```json
+     {
+       "grpc": {
+         "channel_capacity": "500_000"
+       }
+     }
+     ```
+
+  4. **Enable compression** to reduce network time:
+     ```json
+     {
+       "grpc": {
+         "compression": {
+           "send": ["zstd"]
+         }
+       }
+     }
+     ```
+
+  5. **Check subscriber queue sizes**:
+     ```promql
+     grpc_subscriber_queue_size
+     ```
+     Slow clients may be backing up queues.
+</Accordion>
+
+## Performance Issues
+
+<Accordion title="High CPU usage">
+  **Symptoms**:
+  - Plugin consuming excessive CPU
+  - Validator performance degraded
+  - High system load
+
+  **Solutions**:
+
+  1. **Reduce encoder threads**:
+     ```json
+     {
+       "grpc": {
+         "encoder_threads": 2
+       }
+     }
+     ```
+
+  2. **Disable or reduce compression**:
+     ```json
+     {
+       "grpc": {
+         "compression": {
+           "accept": [],
+           "send": []
+         }
+       }
+     }
+     ```
+
+  3. **Limit concurrent subscriptions**:
+     ```json
+     {
+       "grpc": {
+         "subscription_limit": 100,
+         "subscription_limit_enforce": true
+       }
+     }
+     ```
+
+  4. **Set CPU affinity** to isolate plugin:
+     ```json
+     {
+       "tokio": {
+         "worker_threads": 4,
+         "affinity": "4-7"
+       }
+     }
+     ```
+
+  5. **Monitor cache efficiency**:
+     ```promql
+     rate(yellowstone_grpc_pre_encoded_cache_hit[5m]) / 
+       (rate(yellowstone_grpc_pre_encoded_cache_hit[5m]) + 
+        rate(yellowstone_grpc_pre_encoded_cache_miss[5m]))
+     ```
+     Low cache hit rates indicate encoding overhead.
+</Accordion>
+
+<Accordion title="High memory usage">
+  **Symptoms**:
+  - Plugin consuming excessive memory
+  - Out of memory errors
+  - System swapping
+
+  **Solutions**:
+
+  1. **Reduce channel capacities**:
+     ```json
+     {
+       "grpc": {
+         "channel_capacity": "50_000",
+         "snapshot_client_channel_capacity": "10_000_000"
+       }
+     }
+     ```
+
+  2. **Disable replay**:
+     ```json
+     {
+       "grpc": {
+         "replay_stored_slots": 0
+       }
+     }
+     ```
+
+  3. **Limit subscriptions**:
+     ```json
+     {
+       "grpc": {
+         "subscription_limit": 50,
+         "subscription_limit_enforce": true
+       }
+     }
+     ```
+
+  4. **Monitor queue sizes**:
+     ```promql
+     sum(grpc_subscriber_queue_size)
+     ```
+     High queue sizes indicate memory pressure.
+
+  5. **Reduce filter name cache**:
+     ```json
+     {
+       "grpc": {
+         "filter_names_size_limit": 1024
+       }
+     }
+     ```
+</Accordion>
+
+<Accordion title="Network bandwidth saturation">
+  **Symptoms**:
+  - Network interface at capacity
+  - Packet loss
+  - Connection timeouts
+
+  **Solutions**:
+
+  1. **Enable compression**:
+     ```json
+     {
+       "grpc": {
+         "compression": {
+           "send": ["zstd", "gzip"]
+         }
+       }
+     }
+     ```
+
+  2. **Limit data sent per subscription**:
+     - Use more specific filters
+     - Subscribe to fewer message types
+     - Use account data slices to reduce payload size
+
+  3. **Monitor bandwidth per client**:
+     ```promql
+     rate(grpc_bytes_sent[1m])
+     traffic_sent_per_remote_ip_bytes
+     ```
+
+  4. **Rate limit problematic clients**:
+     - Identify high-bandwidth clients
+     - Add filter limits for specific addresses
+     - Consider separate gRPC endpoints for different client types
+</Accordion>
+
+## Authentication Issues
+
+<Accordion title="Token authentication failures">
+  **Symptoms**:
+  - "Unauthenticated" errors
+  - "Invalid token" messages
+  - Connection rejected immediately
+
+  **Solutions**:
+
+  1. **Verify x-token configuration**:
+     ```json
+     {
+       "grpc": {
+         "x_token": "your-secret-token"
+       }
+     }
+     ```
+
+  2. **Check client headers**:
+     ```javascript
+     const metadata = new grpc.Metadata();
+     metadata.add('x-token', 'your-secret-token');
+     client.subscribe(request, metadata);
+     ```
+
+  3. **Test without authentication**:
+     - Temporarily remove `x_token` from config
+     - Verify connection works
+     - Re-enable authentication
+</Accordion>
+
+## Diagnostic Commands
+
+### Check Plugin Status
+
+```bash
+# Verify plugin is loaded
+ps aux | grep -i yellowstone
+
+# Check listening ports
+ss -tlnp | grep -E '(10000|8999)'
+
+# Test gRPC endpoint
+grpcurl -plaintext localhost:10000 list
+
+# Check Prometheus metrics
+curl -s http://localhost:8999/metrics | grep -E '(connections|subscriptions)'
+```
+
+### Debug Client Status
+
+```bash
+# Enable debug endpoint in config
+{
+  "debug_clients_http": true
+}
+
+# View active clients
+curl http://localhost:8999/debug_clients
+```
+
+### Monitor Real-Time Metrics
+
+```bash
+# Watch connection count
+watch -n 1 'curl -s http://localhost:8999/metrics | grep connections_total'
+
+# Monitor message queue
+watch -n 1 'curl -s http://localhost:8999/metrics | grep message_queue_size'
+
+# Track bandwidth
+watch -n 1 'curl -s http://localhost:8999/metrics | grep grpc_bytes_sent'
+```
+
+### Validator Log Analysis
+
+```bash
+# Check for plugin errors
+grep -i "geyser\|yellowstone" /path/to/validator.log
+
+# Look for block reconstruction issues
+grep -i "invalid.*block" /path/to/validator.log
+
+# Monitor connection events
+grep -E "(connect|disconnect)" /path/to/validator.log | grep -i grpc
+```
+
+## Getting Help
+
+### Before Reporting Issues
+
+1. **Collect diagnostic information**:
+   - Plugin version (from Prometheus `/metrics`)
+   - Configuration file
+   - Relevant logs
+   - Prometheus metrics output
+   - Client error messages
+
+2. **Check existing issues**:
+   - Search GitHub issues: https://github.com/rpcpool/yellowstone-grpc/issues
+   - Check known bugs in README
+
+3. **Test with minimal configuration**:
+   - Use default config values
+   - Remove custom filters
+   - Test with official example clients
+
+### Reporting Bugs
+
+When reporting issues, include:
+
+- **Environment**: OS, Solana version, hardware specs
+- **Configuration**: Your config.json (redact sensitive values)
+- **Reproduction steps**: Minimal example to reproduce the issue
+- **Logs**: Relevant error messages and stack traces
+- **Metrics**: Prometheus metrics output at time of issue
+- **Client code**: If applicable, minimal client code showing the problem
+
+### Community Resources
+
+- **Documentation**: https://docs.triton.one/rpc-pool/grpc-subscriptions
+- **GitHub Issues**: https://github.com/rpcpool/yellowstone-grpc/issues
+- **Example Code**:
+  - Go: https://github.com/rpcpool/yellowstone-grpc/tree/master/examples/golang
+  - Rust: https://github.com/rpcpool/yellowstone-grpc/tree/master/examples/rust
+  - TypeScript: https://github.com/rpcpool/yellowstone-grpc/tree/master/examples/typescript

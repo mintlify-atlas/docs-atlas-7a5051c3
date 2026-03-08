@@ -1,0 +1,504 @@
+---
+title: 'Other Languages'
+description: 'Connect to Yellowstone gRPC from Go, Python, and any language with gRPC support'
+---
+
+Yellowstone gRPC uses standard Protocol Buffers and gRPC, making it accessible from any language with gRPC support. This page shows examples for Go and Python, along with guidance for other languages.
+
+## Protocol Buffers
+
+All languages use the same `.proto` definitions:
+
+- [geyser.proto](https://github.com/rpcpool/yellowstone-grpc/blob/master/yellowstone-grpc-proto/proto/geyser.proto) - Main gRPC service definition
+- [solana-storage.proto](https://github.com/rpcpool/yellowstone-grpc/blob/master/yellowstone-grpc-proto/proto/solana-storage.proto) - Solana data structures
+
+## Go Client
+
+### Installation
+
+First, install the required dependencies:
+
+```bash
+go get google.golang.org/grpc
+go get google.golang.org/protobuf
+```
+
+### Generate Go Code
+
+Generate Go code from the proto files:
+
+```bash
+protoc --go_out=. --go_opt=paths=source_relative \
+  --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+  geyser.proto solana-storage.proto
+```
+
+### Basic Connection
+
+```go
+package main
+
+import (
+	"context"
+	"crypto/x509"
+	"log"
+	"time"
+
+	pb "your-module/proto"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/metadata"
+)
+
+var kacp = keepalive.ClientParameters{
+	Time:                10 * time.Second,
+	Timeout:             time.Second,
+	PermitWithoutStream: true,
+}
+
+func main() {
+	// Set up connection options
+	var opts []grpc.DialOption
+
+	// For TLS connections
+	pool, _ := x509.SystemCertPool()
+	creds := credentials.NewClientTLSFromCert(pool, "")
+	opts = append(opts, grpc.WithTransportCredentials(creds))
+
+	// For insecure connections (local development)
+	// opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+
+	opts = append(opts, grpc.WithKeepaliveParams(kacp))
+
+	// Connect to server
+	conn, err := grpc.Dial("api.rpcpool.com:443", opts...)
+	if err != nil {
+		log.Fatalf("Failed to connect: %v", err)
+	}
+	defer conn.Close()
+
+	client := pb.NewGeyserClient(conn)
+
+	// Add authentication token
+	ctx := context.Background()
+	md := metadata.New(map[string]string{"x-token": "your-token-here"})
+	ctx = metadata.NewOutgoingContext(ctx, md)
+
+	// Get version
+	version, err := client.GetVersion(ctx, &pb.GetVersionRequest{})
+	if err != nil {
+		log.Fatalf("GetVersion failed: %v", err)
+	}
+	log.Printf("Server version: %s", version.Version)
+}
+```
+
+### Subscribe to Slots
+
+```go
+func subscribeSlots(client pb.GeyserClient, ctx context.Context) error {
+	stream, err := client.Subscribe(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Create subscription request
+	request := &pb.SubscribeRequest{
+		Slots: map[string]*pb.SubscribeRequestFilterSlots{
+			"client": {},
+		},
+	}
+
+	// Send subscription
+	if err := stream.Send(request); err != nil {
+		return err
+	}
+
+	// Receive updates
+	for {
+		update, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+
+		if slot := update.GetSlot(); slot != nil {
+			log.Printf("Slot: %d (parent: %d)", slot.Slot, slot.Parent)
+		}
+	}
+}
+```
+
+### Subscribe to Accounts
+
+```go
+func subscribeAccounts(client pb.GeyserClient, ctx context.Context) error {
+	stream, err := client.Subscribe(ctx)
+	if err != nil {
+		return err
+	}
+
+	request := &pb.SubscribeRequest{
+		Accounts: map[string]*pb.SubscribeRequestFilterAccounts{
+			"client": {
+				Account: []string{
+					"TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+				},
+				Owner: []string{
+					"11111111111111111111111111111111",
+				},
+				Filters: []*pb.SubscribeRequestFilterAccountsFilter{
+					{
+						Filter: &pb.SubscribeRequestFilterAccountsFilter_Datasize{
+							Datasize: 165,
+						},
+					},
+				},
+			},
+		},
+		Commitment: pb.CommitmentLevel_CONFIRMED.Enum(),
+	}
+
+	if err := stream.Send(request); err != nil {
+		return err
+	}
+
+	for {
+		update, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+
+		if account := update.GetAccount(); account != nil {
+			log.Printf("Account update at slot %d", account.Slot)
+		}
+	}
+}
+```
+
+### Subscribe to Transactions
+
+```go
+func subscribeTransactions(client pb.GeyserClient, ctx context.Context) error {
+	stream, err := client.Subscribe(ctx)
+	if err != nil {
+		return err
+	}
+
+	voteFalse := false
+	failedFalse := false
+
+	request := &pb.SubscribeRequest{
+		Transactions: map[string]*pb.SubscribeRequestFilterTransactions{
+			"client": {
+				Vote:   &voteFalse,
+				Failed: &failedFalse,
+				AccountInclude: []string{
+					"11111111111111111111111111111111",
+				},
+			},
+		},
+		Commitment: pb.CommitmentLevel_CONFIRMED.Enum(),
+	}
+
+	if err := stream.Send(request); err != nil {
+		return err
+	}
+
+	for {
+		update, err := stream.Recv()
+		if err != nil {
+			return err
+		}
+
+		if tx := update.GetTransaction(); tx != nil {
+			log.Printf("Transaction at slot %d", tx.Slot)
+		}
+	}
+}
+```
+
+## Python Client
+
+### Installation
+
+Install the required dependencies:
+
+```bash
+pip install grpcio grpcio-tools
+```
+
+### Generate Python Code
+
+Generate Python code from the proto files:
+
+```bash
+python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. \
+  geyser.proto solana-storage.proto
+```
+
+This generates:
+- `geyser_pb2.py` - Message definitions
+- `geyser_pb2_grpc.py` - Service definitions
+
+### Basic Connection
+
+```python
+import grpc
+import geyser_pb2
+import geyser_pb2_grpc
+from typing import Optional
+
+class TritonAuthMetadataPlugin(grpc.AuthMetadataPlugin):
+    """Metadata wrapper for authentication token."""
+
+    def __init__(self, x_token: str):
+        self.x_token = x_token
+
+    def __call__(
+        self,
+        context: grpc.AuthMetadataContext,
+        callback: grpc.AuthMetadataPluginCallback,
+    ):
+        metadata = (("x-token", self.x_token),)
+        callback(metadata, None)
+
+def main():
+    # Set up credentials
+    auth = TritonAuthMetadataPlugin("your-token-here")
+    ssl_creds = grpc.ssl_channel_credentials()
+    call_creds = grpc.metadata_call_credentials(auth)
+    combined_creds = grpc.composite_channel_credentials(ssl_creds, call_creds)
+
+    # Connect to server
+    with grpc.secure_channel("api.rpcpool.com:443", credentials=combined_creds) as channel:
+        stub = geyser_pb2_grpc.GeyserStub(channel)
+
+        # Get slot
+        response = stub.GetSlot(geyser_pb2.GetSlotRequest())
+        print(f"Current slot: {response.slot}")
+
+        # Get version
+        version = stub.GetVersion(geyser_pb2.GetVersionRequest())
+        print(f"Server version: {version.version}")
+
+if __name__ == "__main__":
+    main()
+```
+
+### Subscribe to Slots
+
+```python
+def subscribe_slots(stub):
+    def generate_requests():
+        # Send initial subscription
+        yield geyser_pb2.SubscribeRequest(
+            slots={
+                "client": geyser_pb2.SubscribeRequestFilterSlots()
+            },
+            commitment=geyser_pb2.CommitmentLevel.PROCESSED,
+        )
+
+    # Stream updates
+    for update in stub.Subscribe(generate_requests()):
+        if update.HasField("slot"):
+            print(f"Slot: {update.slot.slot} (parent: {update.slot.parent})")
+
+# Call from main
+with grpc.secure_channel("api.rpcpool.com:443", credentials=combined_creds) as channel:
+    stub = geyser_pb2_grpc.GeyserStub(channel)
+    subscribe_slots(stub)
+```
+
+### Subscribe to Accounts
+
+```python
+def subscribe_accounts(stub):
+    def generate_requests():
+        yield geyser_pb2.SubscribeRequest(
+            accounts={
+                "client": geyser_pb2.SubscribeRequestFilterAccounts(
+                    account=["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+                    owner=["11111111111111111111111111111111"],
+                    filters=[
+                        geyser_pb2.SubscribeRequestFilterAccountsFilter(
+                            datasize=165
+                        )
+                    ],
+                )
+            },
+            commitment=geyser_pb2.CommitmentLevel.CONFIRMED,
+        )
+
+    for update in stub.Subscribe(generate_requests()):
+        if update.HasField("account"):
+            print(f"Account update at slot {update.account.slot}")
+```
+
+### Subscribe to Transactions
+
+```python
+def subscribe_transactions(stub):
+    def generate_requests():
+        yield geyser_pb2.SubscribeRequest(
+            transactions={
+                "client": geyser_pb2.SubscribeRequestFilterTransactions(
+                    vote=False,
+                    failed=False,
+                    account_include=["11111111111111111111111111111111"],
+                )
+            },
+            commitment=geyser_pb2.CommitmentLevel.CONFIRMED,
+        )
+
+    for update in stub.Subscribe(generate_requests()):
+        if update.HasField("transaction"):
+            print(f"Transaction at slot {update.transaction.slot}")
+```
+
+## Other Languages
+
+### Java
+
+Use the [grpc-java](https://github.com/grpc/grpc-java) library:
+
+```xml
+<dependency>
+    <groupId>io.grpc</groupId>
+    <artifactId>grpc-netty-shaded</artifactId>
+    <version>1.59.0</version>
+</dependency>
+<dependency>
+    <groupId>io.grpc</groupId>
+    <artifactId>grpc-protobuf</artifactId>
+    <version>1.59.0</version>
+</dependency>
+<dependency>
+    <groupId>io.grpc</groupId>
+    <artifactId>grpc-stub</artifactId>
+    <version>1.59.0</version>
+</dependency>
+```
+
+Generate code:
+```bash
+protoc --java_out=src/main/java --grpc-java_out=src/main/java geyser.proto
+```
+
+### C# / .NET
+
+Use the [Grpc.Net.Client](https://www.nuget.org/packages/Grpc.Net.Client) package:
+
+```bash
+dotnet add package Grpc.Net.Client
+dotnet add package Google.Protobuf
+dotnet add package Grpc.Tools
+```
+
+Generate code:
+```bash
+protoc --csharp_out=. --grpc_out=. --plugin=protoc-gen-grpc=grpc_csharp_plugin geyser.proto
+```
+
+### Ruby
+
+Use the [grpc gem](https://rubygems.org/gems/grpc):
+
+```bash
+gem install grpc
+gem install grpc-tools
+```
+
+Generate code:
+```bash
+grpc_tools_ruby_protoc -I. --ruby_out=. --grpc_out=. geyser.proto
+```
+
+### PHP
+
+Use the [grpc extension](https://pecl.php.net/package/grpc):
+
+```bash
+pecl install grpc
+```
+
+Generate code:
+```bash
+protoc --php_out=. --grpc_out=. --plugin=protoc-gen-grpc=grpc_php_plugin geyser.proto
+```
+
+## Common Patterns
+
+### Authentication
+
+All languages add the `x-token` header using gRPC metadata:
+
+- **Go**: Use `metadata.NewOutgoingContext()`
+- **Python**: Use `grpc.metadata_call_credentials()`
+- **Java**: Use `MetadataUtils.newAttachHeadersInterceptor()`
+- **C#**: Use `Metadata` in call options
+
+### TLS Configuration
+
+For secure connections:
+
+- **Go**: `credentials.NewClientTLSFromCert()`
+- **Python**: `grpc.ssl_channel_credentials()`
+- **Java**: `NettyChannelBuilder.useTransportSecurity()`
+- **C#**: `GrpcChannel.ForAddress()` with `https://`
+
+### Keepalive
+
+Configure keepalive to maintain long-lived connections:
+
+- **Go**: Use `grpc.WithKeepaliveParams()`
+- **Python**: Use `options` parameter with `grpc.keepalive_*` settings
+- **Java**: Use `NettyChannelBuilder.keepAliveTime()`
+- **C#**: Use `SocketsHttpHandler.KeepAlivePingDelay`
+
+## Proto Files Location
+
+Get the latest proto files from the repository:
+
+```bash
+git clone https://github.com/rpcpool/yellowstone-grpc.git
+cd yellowstone-grpc/yellowstone-grpc-proto/proto
+```
+
+The main files you need:
+- `geyser.proto` - Service definition
+- `solana-storage.proto` - Solana data structures
+
+## Error Handling
+
+All gRPC clients use standard status codes:
+
+- `OK` (0) - Success
+- `CANCELLED` (1) - Request cancelled
+- `UNKNOWN` (2) - Unknown error
+- `INVALID_ARGUMENT` (3) - Invalid request
+- `DEADLINE_EXCEEDED` (4) - Request timeout
+- `NOT_FOUND` (5) - Resource not found
+- `UNAUTHENTICATED` (16) - Missing or invalid auth token
+- `UNAVAILABLE` (14) - Server unavailable
+
+## Examples Repository
+
+Find complete working examples in the GitHub repository:
+
+- [Go example](https://github.com/rpcpool/yellowstone-grpc/tree/master/examples/golang)
+- [Python example](https://github.com/rpcpool/yellowstone-grpc/tree/master/examples/python)
+- [Rust example](https://github.com/rpcpool/yellowstone-grpc/tree/master/examples/rust)
+- [TypeScript example](https://github.com/rpcpool/yellowstone-grpc/tree/master/examples/typescript)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Subscribe Filters" href="/guides/filtering">
+    Learn about subscription filters and patterns
+  </Card>
+  <Card title="Plugin Setup" href="/plugin/deployment">
+    Deploy your own Yellowstone gRPC plugin
+  </Card>
+</CardGroup>

@@ -1,0 +1,561 @@
+---
+title: "Subscribe"
+description: "Bidirectional streaming RPC method for subscribing to real-time updates from the Solana blockchain"
+---
+
+## Overview
+
+The `Subscribe` method establishes a bidirectional streaming connection that allows you to receive real-time updates from the Solana blockchain. You can subscribe to various update types including accounts, transactions, slots, blocks, and entries.
+
+```proto
+rpc Subscribe(stream SubscribeRequest) returns (stream SubscribeUpdate) {}
+```
+
+## How It Works
+
+Subscribe uses bidirectional streaming, which means:
+
+1. **Client sends initial request**: You send a `SubscribeRequest` with filters defining what data you want to receive
+2. **Server streams updates**: The server continuously sends `SubscribeUpdate` messages matching your filters
+3. **Dynamic updates**: You can send additional `SubscribeRequest` messages at any time to add, modify, or remove filters
+4. **Ping/Pong keepalive**: The connection supports ping/pong messages to keep load balancers and firewalls happy
+
+## SubscribeRequest
+
+The request message defines filters for the types of updates you want to receive.
+
+<ParamField path="accounts" type="map<string, SubscribeRequestFilterAccounts>">
+  Map of account filters. Key is a user-defined filter name, value contains filter criteria.
+</ParamField>
+
+<ParamField path="slots" type="map<string, SubscribeRequestFilterSlots>">
+  Map of slot filters. Subscribe to slot status updates (processed, confirmed, finalized, etc.).
+</ParamField>
+
+<ParamField path="transactions" type="map<string, SubscribeRequestFilterTransactions>">
+  Map of transaction filters. Receive transaction updates with full execution details and metadata.
+</ParamField>
+
+<ParamField path="transactions_status" type="map<string, SubscribeRequestFilterTransactions>">
+  Map of transaction status filters. Receive lightweight transaction status updates (success/failure) without full transaction data.
+</ParamField>
+
+<ParamField path="blocks" type="map<string, SubscribeRequestFilterBlocks>">
+  Map of block filters. Receive complete block data including transactions, accounts, and entries.
+</ParamField>
+
+<ParamField path="blocks_meta" type="map<string, SubscribeRequestFilterBlocksMeta>">
+  Map of block metadata filters. Receive block metadata without full transaction/account data.
+</ParamField>
+
+<ParamField path="entry" type="map<string, SubscribeRequestFilterEntry>">
+  Map of entry filters. Subscribe to ledger entry updates.
+</ParamField>
+
+<ParamField path="commitment" type="CommitmentLevel" optional>
+  Commitment level for updates: PROCESSED (0), CONFIRMED (1), or FINALIZED (2). If not specified, defaults to PROCESSED.
+</ParamField>
+
+<ParamField path="accounts_data_slice" type="SubscribeRequestAccountsDataSlice[]" optional>
+  Array of data slices to receive only portions of account data. Useful for large accounts when you only need specific data ranges.
+</ParamField>
+
+<ParamField path="ping" type="SubscribeRequestPing" optional>
+  Send a ping request. Server will respond with a pong message containing the same ID.
+</ParamField>
+
+<ParamField path="from_slot" type="uint64" optional>
+  Start receiving updates from a specific slot number. Useful for replaying historical data.
+</ParamField>
+
+### Account Filters
+
+<ParamField path="account" type="string[]">
+  List of account public keys to subscribe to (base58 encoded).
+</ParamField>
+
+<ParamField path="owner" type="string[]">
+  List of program owner public keys. Receives updates for all accounts owned by these programs.
+</ParamField>
+
+<ParamField path="filters" type="SubscribeRequestFilterAccountsFilter[]">
+  Additional filters: memcmp (memory comparison), datasize (account data size), token_account_state (valid token accounts), lamports (balance filters).
+</ParamField>
+
+<ParamField path="nonempty_txn_signature" type="bool" optional>
+  Only receive account updates that include a transaction signature.
+</ParamField>
+
+### Transaction Filters
+
+<ParamField path="vote" type="bool" optional>
+  Filter vote transactions. Set to false to exclude vote transactions.
+</ParamField>
+
+<ParamField path="failed" type="bool" optional>
+  Filter failed transactions. Set to true to include failed transactions.
+</ParamField>
+
+<ParamField path="signature" type="string" optional>
+  Subscribe to a specific transaction signature.
+</ParamField>
+
+<ParamField path="account_include" type="string[]">
+  List of accounts. Receive transactions that include any of these accounts.
+</ParamField>
+
+<ParamField path="account_exclude" type="string[]">
+  List of accounts. Exclude transactions that include any of these accounts.
+</ParamField>
+
+<ParamField path="account_required" type="string[]">
+  List of accounts. Receive transactions that include all of these accounts.
+</ParamField>
+
+## SubscribeUpdate
+
+The server responds with a stream of update messages.
+
+<ResponseField name="filters" type="string[]">
+  Names of the filters that matched this update.
+</ResponseField>
+
+<ResponseField name="update_oneof" type="oneof">
+  One of the following update types:
+  
+  - `account`: Account update with balance, data, and ownership changes
+  - `slot`: Slot status update (processed, confirmed, finalized, rooted, dead, etc.)
+  - `transaction`: Full transaction with metadata and execution details
+  - `transaction_status`: Lightweight transaction status (success/error)
+  - `block`: Complete block data
+  - `block_meta`: Block metadata without full transaction data
+  - `entry`: Ledger entry update
+  - `ping`: Server-initiated ping for keepalive
+  - `pong`: Response to client ping
+</ResponseField>
+
+<ResponseField name="created_at" type="google.protobuf.Timestamp">
+  Timestamp when the update was created on the server.
+</ResponseField>
+
+### Account Update
+
+<ResponseField name="account.pubkey" type="bytes">
+  Account public key (32 bytes).
+</ResponseField>
+
+<ResponseField name="account.lamports" type="uint64">
+  Account balance in lamports.
+</ResponseField>
+
+<ResponseField name="account.owner" type="bytes">
+  Program that owns this account (32 bytes).
+</ResponseField>
+
+<ResponseField name="account.executable" type="bool">
+  Whether this account contains executable program data.
+</ResponseField>
+
+<ResponseField name="account.rent_epoch" type="uint64">
+  Epoch when rent is next due.
+</ResponseField>
+
+<ResponseField name="account.data" type="bytes">
+  Account data.
+</ResponseField>
+
+<ResponseField name="account.write_version" type="uint64">
+  Monotonically increasing version number.
+</ResponseField>
+
+<ResponseField name="account.txn_signature" type="bytes" optional>
+  Transaction signature that caused this account update.
+</ResponseField>
+
+<ResponseField name="slot" type="uint64">
+  Slot number for this update.
+</ResponseField>
+
+<ResponseField name="is_startup" type="bool">
+  True if this is a startup/snapshot account (not from a transaction).
+</ResponseField>
+
+### Transaction Update
+
+<ResponseField name="transaction.signature" type="bytes">
+  Transaction signature (64 bytes).
+</ResponseField>
+
+<ResponseField name="transaction.is_vote" type="bool">
+  Whether this is a vote transaction.
+</ResponseField>
+
+<ResponseField name="transaction.transaction" type="solana.storage.ConfirmedBlock.Transaction">
+  Full transaction data including message and signatures.
+</ResponseField>
+
+<ResponseField name="transaction.meta" type="solana.storage.ConfirmedBlock.TransactionStatusMeta">
+  Transaction metadata including status, fee, logs, compute units, and account changes.
+</ResponseField>
+
+<ResponseField name="transaction.index" type="uint64">
+  Transaction index within the block.
+</ResponseField>
+
+<ResponseField name="slot" type="uint64">
+  Slot number containing this transaction.
+</ResponseField>
+
+## Examples
+
+<CodeGroup>
+
+```rust Rust
+use yellowstone_grpc_client::GeyserGrpcClient;
+use yellowstone_grpc_proto::prelude::{
+    SubscribeRequest, SubscribeRequestFilterSlots,
+    SubscribeRequestFilterTransactions, CommitmentLevel,
+};
+use futures::stream::StreamExt;
+use std::collections::HashMap;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Connect to the gRPC endpoint
+    let mut client = GeyserGrpcClient::build_from_shared("http://127.0.0.1:10000")?
+        .x_token(Some("your-token-here"))?
+        .connect()
+        .await?;
+
+    // Create subscription request
+    let mut slots = HashMap::new();
+    slots.insert(
+        "client".to_string(),
+        SubscribeRequestFilterSlots {
+            filter_by_commitment: Some(true),
+            ..Default::default()
+        },
+    );
+
+    let mut transactions = HashMap::new();
+    transactions.insert(
+        "client".to_string(),
+        SubscribeRequestFilterTransactions {
+            vote: Some(false),
+            failed: Some(false),
+            account_include: vec!["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()],
+            ..Default::default()
+        },
+    );
+
+    let request = SubscribeRequest {
+        slots,
+        transactions,
+        commitment: Some(CommitmentLevel::Confirmed as i32),
+        ..Default::default()
+    };
+
+    // Subscribe and receive updates
+    let (mut subscribe_tx, mut stream) = client
+        .subscribe_with_request(Some(request))
+        .await?;
+
+    println!("Subscription started, receiving updates...");
+    
+    while let Some(message) = stream.next().await {
+        match message {
+            Ok(msg) => {
+                println!("Received update: filters={:?}", msg.filters);
+                // Handle different update types
+                if let Some(update) = msg.update_oneof {
+                    // Process the update
+                }
+            }
+            Err(error) => {
+                eprintln!("Error: {:?}", error);
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+```
+
+```typescript TypeScript
+import Client, {
+  CommitmentLevel,
+  SubscribeRequest,
+} from "@triton-one/yellowstone-grpc";
+
+async function subscribeToUpdates() {
+  // Connect to the gRPC endpoint
+  const client = new Client(
+    "http://127.0.0.1:10000",
+    "your-token-here",
+    {
+      grpcMaxDecodingMessageSize: 64 * 1024 * 1024, // 64MiB
+    }
+  );
+
+  await client.connect();
+
+  // Create subscription stream
+  const stream = await client.subscribe();
+
+  // Handle stream events
+  stream.on("data", (data) => {
+    console.log("Received update:", data.filters);
+    
+    if (data.transaction) {
+      console.log("Transaction update:", {
+        slot: data.transaction.slot,
+        signature: data.transaction.transaction.signature,
+        isVote: data.transaction.transaction.isVote,
+      });
+    }
+    
+    if (data.slot) {
+      console.log("Slot update:", {
+        slot: data.slot.slot,
+        parent: data.slot.parent,
+        status: data.slot.status,
+      });
+    }
+  });
+
+  stream.on("error", (error) => {
+    console.error("Stream error:", error);
+    stream.end();
+  });
+
+  stream.on("end", () => {
+    console.log("Stream ended");
+  });
+
+  // Send subscription request
+  const request: SubscribeRequest = {
+    slots: {
+      client: {
+        filterByCommitment: true,
+      },
+    },
+    transactions: {
+      client: {
+        vote: false,
+        failed: false,
+        accountInclude: ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+      },
+    },
+    commitment: CommitmentLevel.CONFIRMED,
+    accountsDataSlice: [],
+    ping: undefined,
+  };
+
+  await new Promise<void>((resolve, reject) => {
+    stream.write(request, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+
+  console.log("Subscription sent, receiving updates...");
+}
+
+subscribeToUpdates().catch(console.error);
+```
+
+```python Python
+import grpc
+import geyser_pb2
+import geyser_pb2_grpc
+
+def subscribe_to_updates():
+    # Set up authentication
+    x_token = "your-token-here"
+    call_creds = grpc.access_token_call_credentials(x_token)
+    ssl_creds = grpc.ssl_channel_credentials()
+    combined_creds = grpc.composite_channel_credentials(ssl_creds, call_creds)
+    
+    # Connect to the gRPC endpoint
+    channel = grpc.secure_channel(
+        "127.0.0.1:10000",
+        credentials=combined_creds
+    )
+    stub = geyser_pb2_grpc.GeyserStub(channel)
+    
+    # Create subscription request
+    request = geyser_pb2.SubscribeRequest(
+        slots={
+            "client": geyser_pb2.SubscribeRequestFilterSlots(
+                filter_by_commitment=True
+            )
+        },
+        transactions={
+            "client": geyser_pb2.SubscribeRequestFilterTransactions(
+                vote=False,
+                failed=False,
+                account_include=["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"]
+            )
+        },
+        commitment=geyser_pb2.CommitmentLevel.CONFIRMED
+    )
+    
+    # Subscribe and receive updates
+    def request_generator():
+        yield request
+    
+    responses = stub.Subscribe(request_generator())
+    
+    print("Subscription started, receiving updates...")
+    for response in responses:
+        print(f"Received update: filters={response.filters}")
+        
+        if response.HasField("slot"):
+            print(f"Slot update: slot={response.slot.slot}, status={response.slot.status}")
+        
+        if response.HasField("transaction"):
+            tx = response.transaction.transaction
+            print(f"Transaction update: slot={response.transaction.slot}, signature={tx.signature.hex()}")
+
+if __name__ == "__main__":
+    subscribe_to_updates()
+```
+
+```go Go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    
+    pb "github.com/rpcpool/yellowstone-grpc/examples/golang/proto"
+    "google.golang.org/grpc"
+    "google.golang.org/grpc/credentials"
+    "google.golang.org/grpc/metadata"
+)
+
+func main() {
+    // Set up connection
+    creds := credentials.NewClientTLSFromCert(nil, "")
+    conn, err := grpc.Dial(
+        "127.0.0.1:10000",
+        grpc.WithTransportCredentials(creds),
+    )
+    if err != nil {
+        log.Fatalf("Failed to connect: %v", err)
+    }
+    defer conn.Close()
+    
+    // Add authentication token
+    ctx := metadata.AppendToOutgoingContext(
+        context.Background(),
+        "x-token", "your-token-here",
+    )
+    
+    client := pb.NewGeyserClient(conn)
+    
+    // Create subscription
+    stream, err := client.Subscribe(ctx)
+    if err != nil {
+        log.Fatalf("Failed to subscribe: %v", err)
+    }
+    
+    // Send subscription request
+    request := &pb.SubscribeRequest{
+        Slots: map[string]*pb.SubscribeRequestFilterSlots{
+            "client": {
+                FilterByCommitment: boolPtr(true),
+            },
+        },
+        Transactions: map[string]*pb.SubscribeRequestFilterTransactions{
+            "client": {
+                Vote:   boolPtr(false),
+                Failed: boolPtr(false),
+                AccountInclude: []string{
+                    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                },
+            },
+        },
+        Commitment: pb.CommitmentLevel_CONFIRMED.Enum(),
+    }
+    
+    if err := stream.Send(request); err != nil {
+        log.Fatalf("Failed to send request: %v", err)
+    }
+    
+    fmt.Println("Subscription started, receiving updates...")
+    
+    // Receive updates
+    for {
+        update, err := stream.Recv()
+        if err != nil {
+            log.Fatalf("Error receiving update: %v", err)
+        }
+        
+        fmt.Printf("Received update: filters=%v\n", update.Filters)
+        
+        switch u := update.UpdateOneof.(type) {
+        case *pb.SubscribeUpdate_Slot:
+            fmt.Printf("Slot update: slot=%d, status=%v\n",
+                u.Slot.Slot, u.Slot.Status)
+        case *pb.SubscribeUpdate_Transaction:
+            fmt.Printf("Transaction update: slot=%d\n",
+                u.Transaction.Slot)
+        }
+    }
+}
+
+func boolPtr(b bool) *bool {
+    return &b
+}
+```
+
+</CodeGroup>
+
+## Dynamic Filter Updates
+
+You can update your subscription filters at any time by sending a new `SubscribeRequest` on the existing stream. This allows you to add new filters, remove existing ones, or modify filter parameters without reconnecting.
+
+```rust
+// Later, update the subscription to add account filters
+let mut accounts = HashMap::new();
+accounts.insert(
+    "token_accounts".to_string(),
+    SubscribeRequestFilterAccounts {
+        owner: vec!["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()],
+        ..Default::default()
+    },
+);
+
+let update_request = SubscribeRequest {
+    accounts,
+    ..Default::default()
+};
+
+subscribe_tx.send(update_request).await?;
+```
+
+## Keepalive with Ping/Pong
+
+For long-running connections, especially behind load balancers, use ping/pong messages:
+
+```rust
+// Respond to server pings
+if let Some(UpdateOneof::Ping(_)) = msg.update_oneof {
+    subscribe_tx.send(SubscribeRequest {
+        ping: Some(SubscribeRequestPing { id: 1 }),
+        ..Default::default()
+    }).await?;
+}
+```
+
+## Best Practices
+
+- **Use specific filters**: Subscribe only to the data you need to reduce bandwidth and processing overhead
+- **Handle backpressure**: Process updates quickly or use buffering to avoid blocking the stream
+- **Set appropriate commitment**: Use PROCESSED for real-time data, CONFIRMED for reduced reorg risk, or FINALIZED for immutability
+- **Implement reconnection logic**: Networks are unreliable; implement exponential backoff and reconnection
+- **Monitor memory**: Account and transaction data can be large; use data slices for accounts when possible
+- **Filter votes**: Most applications should set `vote: false` to exclude vote transactions

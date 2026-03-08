@@ -1,0 +1,383 @@
+---
+title: 'Data Slicing'
+description: 'Reduce bandwidth by receiving only the parts of account data you need'
+---
+
+## Overview
+
+Account data can be very large, especially for program accounts. Yellowstone gRPC provides the `accounts_data_slice` feature to receive only specific portions of account data, significantly reducing bandwidth and improving performance.
+
+## How Data Slicing Works
+
+Instead of receiving the full account data field, you specify one or more slices (offset and length) that you want to receive:
+
+```protobuf
+message SubscribeRequestAccountsDataSlice {
+  uint64 offset = 1;
+  uint64 length = 2;
+}
+```
+
+**Fields:**
+- `offset` - The starting byte position in the account data
+- `length` - The number of bytes to read from the offset
+
+## Basic Example
+
+<Tabs>
+  <Tab title="Rust">
+    ```rust
+    use yellowstone_grpc_proto::prelude::{
+        SubscribeRequest,
+        SubscribeRequestAccountsDataSlice,
+        SubscribeRequestFilterAccounts,
+    };
+    use std::collections::HashMap;
+
+    let mut accounts = HashMap::new();
+    accounts.insert(
+        "token-accounts".to_owned(),
+        SubscribeRequestFilterAccounts {
+            account: vec![],
+            owner: vec!["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()],
+            filters: vec![],
+            nonempty_txn_signature: None,
+        },
+    );
+
+    // Only get the mint (32 bytes at offset 0) and amount (8 bytes at offset 64)
+    let accounts_data_slice = vec![
+        SubscribeRequestAccountsDataSlice {
+            offset: 0,
+            length: 32,
+        },
+        SubscribeRequestAccountsDataSlice {
+            offset: 64,
+            length: 8,
+        },
+    ];
+
+    let request = SubscribeRequest {
+        accounts,
+        accounts_data_slice,
+        ..Default::default()
+    };
+    ```
+  </Tab>
+
+  <Tab title="TypeScript">
+    ```typescript
+    import Client from "@triton-one/yellowstone-grpc";
+
+    const client = new Client(endpoint, token);
+    await client.connect();
+
+    const stream = await client.subscribe();
+
+    const request = {
+      accounts: {
+        "token-accounts": {
+          account: [],
+          owner: ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+          filters: [],
+        },
+      },
+      accountsDataSlice: [
+        { offset: 0, length: 32 },   // Mint address
+        { offset: 64, length: 8 },   // Amount
+      ],
+    };
+
+    stream.write(request);
+    ```
+  </Tab>
+
+  <Tab title="Command Line">
+    ```bash
+    cargo run --bin client -- \
+      --endpoint http://127.0.0.1:10000 \
+      subscribe \
+      --accounts \
+      --accounts-owner TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA \
+      --accounts-data-slice 0,32 \
+      --accounts-data-slice 64,8
+    ```
+  </Tab>
+</Tabs>
+
+## Common Use Cases
+
+<AccordionGroup>
+  <Accordion title="SPL Token Account - Get only mint and amount">
+    SPL Token accounts are 165 bytes, but you often only need the mint and amount:
+
+    ```rust
+    // Token account layout:
+    // 0-32:   mint (32 bytes)
+    // 32-64:  owner (32 bytes)
+    // 64-72:  amount (8 bytes)
+    // 72-105: delegate (33 bytes)
+    // 105-106: state (1 byte)
+    // ...
+
+    let accounts_data_slice = vec![
+        SubscribeRequestAccountsDataSlice {
+            offset: 0,
+            length: 32, // Mint
+        },
+        SubscribeRequestAccountsDataSlice {
+            offset: 64,
+            length: 8, // Amount
+        },
+    ];
+    ```
+
+    **Benefits:**
+    - Receive only 40 bytes instead of 165 bytes
+    - ~75% bandwidth reduction
+  </Accordion>
+
+  <Accordion title="Get only account owner">
+    If you only care about the owner field:
+
+    ```rust
+    let accounts_data_slice = vec![
+        SubscribeRequestAccountsDataSlice {
+            offset: 32,
+            length: 32, // Owner pubkey
+        },
+    ];
+    ```
+  </Accordion>
+
+  <Accordion title="Get SPL Token delegate and delegated amount">
+    ```rust
+    let accounts_data_slice = vec![
+        SubscribeRequestAccountsDataSlice {
+            offset: 72,
+            length: 33, // Delegate (Option<Pubkey>)
+        },
+        SubscribeRequestAccountsDataSlice {
+            offset: 105,
+            length: 8, // Delegated amount
+        },
+    ];
+    ```
+  </Accordion>
+
+  <Accordion title="Monitor specific fields in a custom program account">
+    For custom program accounts, slice based on your data structure:
+
+    ```rust
+    // Example: Custom program account with counter at offset 8
+    let accounts_data_slice = vec![
+        SubscribeRequestAccountsDataSlice {
+            offset: 8,
+            length: 8, // u64 counter
+        },
+    ];
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Multiple Slices
+
+You can specify multiple slices to get non-contiguous data:
+
+```rust
+let accounts_data_slice = vec![
+    SubscribeRequestAccountsDataSlice {
+        offset: 0,
+        length: 32, // First field
+    },
+    SubscribeRequestAccountsDataSlice {
+        offset: 100,
+        length: 16, // Skip bytes 32-99, get bytes 100-115
+    },
+    SubscribeRequestAccountsDataSlice {
+        offset: 200,
+        length: 8, // Skip bytes 116-199, get bytes 200-207
+    },
+];
+```
+
+## How Sliced Data is Returned
+
+When you use data slicing, the account data in the response is concatenated:
+
+```rust
+// If you request slices:
+// - offset: 0, length: 32
+// - offset: 64, length: 8
+
+// The response account.data will contain 40 bytes:
+// - Bytes 0-31: data from original offset 0-31
+// - Bytes 32-39: data from original offset 64-71
+
+let account_update = /* received from stream */;
+let data = account_update.account.unwrap().data;
+
+// data.len() == 40
+// data[0..32] = mint
+// data[32..40] = amount
+```
+
+## Performance Benefits
+
+<CardGroup cols={2}>
+  <Card title="Bandwidth Reduction" icon="gauge-high">
+    Receive only the bytes you need, reducing network traffic by 50-90% depending on account size
+  </Card>
+  <Card title="Faster Processing" icon="bolt">
+    Smaller messages mean faster serialization, deserialization, and processing
+  </Card>
+  <Card title="Lower Costs" icon="dollar-sign">
+    Reduced bandwidth can lower data transfer costs with cloud providers
+  </Card>
+  <Card title="Better Scalability" icon="arrow-up-right-dots">
+    Handle more subscriptions with the same infrastructure
+  </Card>
+</CardGroup>
+
+## SPL Token Account Layout Reference
+
+For convenience, here's the complete SPL Token account layout:
+
+```rust
+// Total size: 165 bytes
+
+pub struct Account {
+    pub mint: Pubkey,                 // offset: 0,   size: 32
+    pub owner: Pubkey,                // offset: 32,  size: 32
+    pub amount: u64,                  // offset: 64,  size: 8
+    pub delegate: Option<Pubkey>,     // offset: 72,  size: 36 (4 + 32)
+    pub state: AccountState,          // offset: 108, size: 1
+    pub is_native: Option<u64>,       // offset: 109, size: 12 (4 + 8)
+    pub delegated_amount: u64,        // offset: 121, size: 8
+    pub close_authority: Option<Pubkey>, // offset: 129, size: 36 (4 + 32)
+}
+```
+
+**Common slices for SPL Token accounts:**
+
+| Data | Offset | Length | Description |
+|------|--------|--------|-------------|
+| Mint | 0 | 32 | Token mint address |
+| Owner | 32 | 32 | Token account owner |
+| Amount | 64 | 8 | Token balance |
+| Delegate | 72 | 36 | Delegate authority (if set) |
+| State | 108 | 1 | Account state (Uninitialized/Initialized/Frozen) |
+| Is Native | 109 | 12 | Whether this is native SOL |
+| Delegated Amount | 121 | 8 | Amount delegated |
+| Close Authority | 129 | 36 | Close authority (if set) |
+
+## Example: Monitoring Token Balances
+
+Here's a complete example that monitors token account balances with minimal bandwidth:
+
+```rust
+use yellowstone_grpc_proto::prelude::{
+    SubscribeRequest,
+    SubscribeRequestAccountsDataSlice,
+    SubscribeRequestFilterAccounts,
+    SubscribeRequestFilterAccountsFilter,
+    SubscribeRequestFilterAccountsFilterMemcmp,
+    subscribe_request_filter_accounts_filter::Filter as AccountsFilterOneof,
+    subscribe_request_filter_accounts_filter_memcmp::Data as AccountsFilterMemcmpOneof,
+    subscribe_update::UpdateOneof,
+    CommitmentLevel,
+};
+use std::collections::HashMap;
+
+let usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+let mut accounts = HashMap::new();
+accounts.insert(
+    "usdc-accounts".to_owned(),
+    SubscribeRequestFilterAccounts {
+        account: vec![],
+        owner: vec!["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()],
+        filters: vec![
+            // Filter for USDC mint
+            SubscribeRequestFilterAccountsFilter {
+                filter: Some(AccountsFilterOneof::Memcmp(
+                    SubscribeRequestFilterAccountsFilterMemcmp {
+                        offset: 0,
+                        data: Some(AccountsFilterMemcmpOneof::Base58(usdc_mint.to_string())),
+                    },
+                )),
+            },
+        ],
+        nonempty_txn_signature: None,
+    },
+);
+
+// Only get owner and amount
+let accounts_data_slice = vec![
+    SubscribeRequestAccountsDataSlice {
+        offset: 32,
+        length: 32, // Owner
+    },
+    SubscribeRequestAccountsDataSlice {
+        offset: 64,
+        length: 8, // Amount
+    },
+];
+
+let request = SubscribeRequest {
+    accounts,
+    accounts_data_slice,
+    commitment: Some(CommitmentLevel::Confirmed as i32),
+    ..Default::default()
+};
+
+// Process updates
+while let Some(message) = stream.next().await {
+    match message?.update_oneof {
+        Some(UpdateOneof::Account(account_update)) => {
+            let account = account_update.account.unwrap();
+            let data = account.data;
+            
+            // data[0..32] = owner
+            // data[32..40] = amount (u64 little-endian)
+            let amount = u64::from_le_bytes(data[32..40].try_into().unwrap());
+            println!("USDC balance update: {} tokens", amount as f64 / 1_000_000.0);
+        }
+        _ => {}
+    }
+}
+```
+
+## Important Considerations
+
+<Warning>
+**Offset Validation**
+
+Make sure your offset + length doesn't exceed the account data size, or you may receive incomplete data or errors.
+</Warning>
+
+<Note>
+**Data Concatenation**
+
+Remember that multiple slices are concatenated in order. Parse the returned data accordingly.
+</Note>
+
+<Info>
+**Empty Slice Array**
+
+If `accounts_data_slice` is empty, you'll receive the full account data.
+</Info>
+
+## Best Practices
+
+1. **Calculate exact offsets** - Know your account data layout precisely
+2. **Request minimal data** - Only slice the fields you actually need
+3. **Document your slices** - Add comments explaining what each slice represents
+4. **Validate data length** - Check that received data matches expected slice sizes
+5. **Handle parsing errors** - Account data can change; handle unexpected sizes gracefully
+
+## Next Steps
+
+- Learn about [Filtering](/guides/filtering) to narrow down which accounts to monitor
+- Understand [Subscribing](/guides/subscribing) for the basics of account subscriptions
+- Explore [Commitment Levels](/guides/commitment-levels) to control update timing

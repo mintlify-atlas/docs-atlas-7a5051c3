@@ -1,0 +1,291 @@
+---
+title: "Slot Messages"
+description: "Slot-related message types for Geyser updates"
+---
+
+## Overview
+
+Slot messages provide updates about slot progression and status changes on the Solana blockchain. Slots are the fundamental unit of time in Solana, occurring approximately every 400ms.
+
+## SubscribeUpdateSlot
+
+Slot status update message.
+
+```protobuf
+message SubscribeUpdateSlot {
+  uint64 slot = 1;
+  optional uint64 parent = 2;
+  SlotStatus status = 3;
+  optional string dead_error = 4;
+}
+```
+
+### Fields
+
+<ResponseField name="slot" type="uint64" required>
+  The slot number being updated.
+</ResponseField>
+
+<ResponseField name="parent" type="uint64">
+  The parent slot number. Most slots have a parent, but this field may be absent in certain edge cases (e.g., genesis slot).
+</ResponseField>
+
+<ResponseField name="status" type="SlotStatus" required>
+  The current status of this slot. See [SlotStatus](#slotstatus) below for possible values.
+</ResponseField>
+
+<ResponseField name="dead_error" type="string">
+  Error message if the slot is marked as dead (status = `SLOT_DEAD`). Describes why the slot was abandoned. Empty for other statuses.
+</ResponseField>
+
+### Examples
+
+#### Processed Slot
+
+```json
+{
+  "slot": 250000000,
+  "parent": 249999999,
+  "status": "SLOT_PROCESSED"
+}
+```
+
+#### Confirmed Slot
+
+```json
+{
+  "slot": 250000000,
+  "parent": 249999999,
+  "status": "SLOT_CONFIRMED"
+}
+```
+
+#### Finalized Slot
+
+```json
+{
+  "slot": 250000000,
+  "parent": 249999999,
+  "status": "SLOT_FINALIZED"
+}
+```
+
+#### Dead Slot
+
+```json
+{
+  "slot": 250000000,
+  "parent": 249999999,
+  "status": "SLOT_DEAD",
+  "dead_error": "TooManyDuplicateShreds"
+}
+```
+
+## SlotStatus
+
+Enum defining the possible states of a slot.
+
+```protobuf
+enum SlotStatus {
+  SLOT_PROCESSED = 0;
+  SLOT_CONFIRMED = 1;
+  SLOT_FINALIZED = 2;
+  SLOT_FIRST_SHRED_RECEIVED = 3;
+  SLOT_COMPLETED = 4;
+  SLOT_CREATED_BANK = 5;
+  SLOT_DEAD = 6;
+}
+```
+
+### Status Values
+
+<ResponseField name="SLOT_PROCESSED" type="0">
+  The slot has been processed by a validator. This is the earliest status indicating that transactions in this slot have been executed. May still be subject to rollback.
+</ResponseField>
+
+<ResponseField name="SLOT_CONFIRMED" type="1">
+  The slot has been confirmed by a supermajority of the cluster. More reliable than processed, but still potentially subject to rollback in extreme circumstances.
+</ResponseField>
+
+<ResponseField name="SLOT_FINALIZED" type="2">
+  The slot has been finalized (rooted). This is the final state for a valid slot. Once finalized, a slot is permanent and cannot be rolled back.
+</ResponseField>
+
+<ResponseField name="SLOT_FIRST_SHRED_RECEIVED" type="3">
+  The first shred (packet of data) for this slot has been received. This is the earliest signal that work on a slot has begun. Only sent if you enable `interslot_updates` in your slot filter.
+</ResponseField>
+
+<ResponseField name="SLOT_COMPLETED" type="4">
+  All shreds for the slot have been received and the slot is complete. Only sent if you enable `interslot_updates` in your slot filter.
+</ResponseField>
+
+<ResponseField name="SLOT_CREATED_BANK" type="5">
+  A bank (execution context) has been created for this slot. Only sent if you enable `interslot_updates` in your slot filter.
+</ResponseField>
+
+<ResponseField name="SLOT_DEAD" type="6">
+  The slot has been marked as dead and abandoned. This can happen for various reasons (e.g., fork, duplicate shreds, validator errors). Check the `dead_error` field for details.
+</ResponseField>
+
+## Status Progression
+
+Slots typically progress through these states:
+
+1. **SLOT_FIRST_SHRED_RECEIVED** (if `interslot_updates` enabled) - First data received
+2. **SLOT_CREATED_BANK** (if `interslot_updates` enabled) - Execution context created
+3. **SLOT_COMPLETED** (if `interslot_updates` enabled) - All data received
+4. **SLOT_PROCESSED** - Transactions executed
+5. **SLOT_CONFIRMED** - Confirmed by supermajority
+6. **SLOT_FINALIZED** - Permanently finalized
+
+Alternatively, at any point:
+- **SLOT_DEAD** - Slot abandoned
+
+## Subscription Options
+
+### Basic Slot Subscription
+
+Receive only major status updates (processed, confirmed, finalized):
+
+```json
+{
+  "slots": {
+    "all_slots": {}
+  },
+  "commitment": "CONFIRMED"
+}
+```
+
+### Commitment-Filtered Slots
+
+Receive only updates matching your commitment level:
+
+```json
+{
+  "slots": {
+    "finalized_only": {
+      "filter_by_commitment": true
+    }
+  },
+  "commitment": "FINALIZED"
+}
+```
+
+### Inter-Slot Updates
+
+Receive all status updates including intermediate states:
+
+```json
+{
+  "slots": {
+    "detailed_slots": {
+      "interslot_updates": true
+    }
+  }
+}
+```
+
+### Both Options Combined
+
+```json
+{
+  "slots": {
+    "filtered_detailed": {
+      "filter_by_commitment": true,
+      "interslot_updates": true
+    }
+  },
+  "commitment": "CONFIRMED"
+}
+```
+
+## Use Cases
+
+### Tracking Chain Progress
+
+Monitor slot progression to track blockchain progress:
+
+```javascript
+if (update.slot) {
+  const slot = update.slot;
+  console.log(`Slot ${slot.slot}: ${slot.status}`);
+  
+  if (slot.status === 'SLOT_FINALIZED') {
+    console.log(`Slot ${slot.slot} is now permanent`);
+  }
+}
+```
+
+### Detecting Forks and Rollbacks
+
+Monitor dead slots to detect potential chain issues:
+
+```javascript
+if (update.slot && update.slot.status === 'SLOT_DEAD') {
+  console.warn(`Slot ${update.slot.slot} was abandoned: ${update.slot.dead_error}`);
+  // Handle potential rollback
+}
+```
+
+### Measuring Slot Timing
+
+Use inter-slot updates to measure slot production timing:
+
+```javascript
+const slotTiming = {};
+
+if (update.slot) {
+  const slot = update.slot.slot;
+  const status = update.slot.status;
+  
+  if (!slotTiming[slot]) {
+    slotTiming[slot] = {};
+  }
+  
+  slotTiming[slot][status] = Date.now();
+  
+  if (status === 'SLOT_FINALIZED' && slotTiming[slot]['SLOT_FIRST_SHRED_RECEIVED']) {
+    const duration = slotTiming[slot]['SLOT_FINALIZED'] - slotTiming[slot]['SLOT_FIRST_SHRED_RECEIVED'];
+    console.log(`Slot ${slot} took ${duration}ms from first shred to finalization`);
+  }
+}
+```
+
+### Commitment-Based Processing
+
+Process data based on slot commitment level:
+
+```javascript
+if (update.slot) {
+  const slot = update.slot;
+  
+  switch (slot.status) {
+    case 'SLOT_PROCESSED':
+      // Fast but potentially unstable data
+      console.log('Processing slot data (may rollback)');
+      break;
+    case 'SLOT_CONFIRMED':
+      // More stable data
+      console.log('Confirmed slot data (unlikely to rollback)');
+      break;
+    case 'SLOT_FINALIZED':
+      // Permanent data
+      console.log('Finalized slot data (permanent)');
+      break;
+  }
+}
+```
+
+## Understanding Slot vs Block
+
+- **Slot**: A fixed time period (~400ms) in which a leader validator can produce a block
+- **Block**: The actual data produced during a slot
+
+Not all slots produce blocks (a slot can be skipped), but when they do, the block number equals the slot number.
+
+## Related
+
+- [Filter Messages](/api/messages/filters#slot-filters) - Slot filter configuration
+- [Block Messages](/api/messages/block) - Block updates associated with slots
+- [SubscribeRequest](/api/messages/subscribe-request) - How to subscribe to slot updates
+- [SubscribeUpdate](/api/messages/subscribe-update) - Parent message containing slot updates

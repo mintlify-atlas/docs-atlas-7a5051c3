@@ -1,0 +1,564 @@
+---
+title: 'Filtering Updates'
+description: 'Learn how to filter accounts, transactions, and blocks to receive only the data you need'
+---
+
+## Overview
+
+Yellowstone gRPC provides powerful filtering capabilities to narrow down the stream of updates you receive. Filters work as logical operations:
+
+- **Within a filter**: Fields work as logical `AND`
+- **Within arrays**: Values work as logical `OR`
+- **Exception**: Filter arrays (like `memcmp` filters) work as logical `AND`
+
+If all filter fields are empty, all updates of that type are broadcast.
+
+## Account Filters
+
+Account filters allow you to subscribe to specific accounts or accounts matching certain criteria.
+
+### Filter by Account Pubkey
+
+Subscribe to specific account addresses:
+
+```rust
+use yellowstone_grpc_proto::prelude::{
+    SubscribeRequestFilterAccounts,
+};
+
+let filter = SubscribeRequestFilterAccounts {
+    account: vec![
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string(),
+        "11111111111111111111111111111111".to_string(),
+    ],
+    owner: vec![],
+    filters: vec![],
+    nonempty_txn_signature: None,
+};
+```
+
+### Filter by Owner Pubkey
+
+Subscribe to all accounts owned by specific programs:
+
+```rust
+let filter = SubscribeRequestFilterAccounts {
+    account: vec![],
+    owner: vec![
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string(), // All token accounts
+    ],
+    filters: vec![],
+    nonempty_txn_signature: None,
+};
+```
+
+### Advanced Account Filters
+
+Yellowstone supports the same filter types as `getProgramAccounts`:
+
+<Tabs>
+  <Tab title="Memcmp Filter">
+    Filter by comparing bytes at a specific offset in account data:
+
+    ```rust
+    use yellowstone_grpc_proto::prelude::{
+        SubscribeRequestFilterAccountsFilter,
+        SubscribeRequestFilterAccountsFilterMemcmp,
+        subscribe_request_filter_accounts_filter::Filter as AccountsFilterOneof,
+        subscribe_request_filter_accounts_filter_memcmp::Data as AccountsFilterMemcmpOneof,
+    };
+
+    let memcmp_filter = SubscribeRequestFilterAccountsFilter {
+        filter: Some(AccountsFilterOneof::Memcmp(
+            SubscribeRequestFilterAccountsFilterMemcmp {
+                offset: 0,
+                data: Some(AccountsFilterMemcmpOneof::Base58(
+                    "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string(),
+                )),
+            },
+        )),
+    };
+
+    let filter = SubscribeRequestFilterAccounts {
+        account: vec![],
+        owner: vec![],
+        filters: vec![memcmp_filter],
+        nonempty_txn_signature: None,
+    };
+    ```
+
+    **Memcmp Data Formats:**
+
+    ```protobuf
+    message SubscribeRequestFilterAccountsFilterMemcmp {
+      uint64 offset = 1;
+      oneof data {
+        bytes bytes = 2;    // Raw bytes
+        string base58 = 3;  // Base58 encoded string
+        string base64 = 4;  // Base64 encoded string
+      }
+    }
+    ```
+
+    **TypeScript Example:**
+
+    ```typescript
+    const filter = {
+      account: [],
+      owner: [],
+      filters: [
+        {
+          memcmp: {
+            offset: 32,
+            base58: "YourDataHere",
+          },
+        },
+      ],
+    };
+    ```
+  </Tab>
+
+  <Tab title="Data Size Filter">
+    Filter accounts by their data size:
+
+    ```rust
+    use yellowstone_grpc_proto::prelude::{
+        SubscribeRequestFilterAccountsFilter,
+        subscribe_request_filter_accounts_filter::Filter as AccountsFilterOneof,
+    };
+
+    let datasize_filter = SubscribeRequestFilterAccountsFilter {
+        filter: Some(AccountsFilterOneof::Datasize(165)), // SPL Token account size
+    };
+
+    let filter = SubscribeRequestFilterAccounts {
+        account: vec![],
+        owner: vec!["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()],
+        filters: vec![datasize_filter],
+        nonempty_txn_signature: None,
+    };
+    ```
+
+    **TypeScript Example:**
+
+    ```typescript
+    const filter = {
+      owner: ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+      filters: [
+        {
+          datasize: 165,
+        },
+      ],
+    };
+    ```
+  </Tab>
+
+  <Tab title="Token Account State">
+    Filter for valid token accounts only:
+
+    ```rust
+    use yellowstone_grpc_proto::prelude::{
+        SubscribeRequestFilterAccountsFilter,
+        subscribe_request_filter_accounts_filter::Filter as AccountsFilterOneof,
+    };
+
+    let token_filter = SubscribeRequestFilterAccountsFilter {
+        filter: Some(AccountsFilterOneof::TokenAccountState(true)),
+    };
+
+    let filter = SubscribeRequestFilterAccounts {
+        account: vec![],
+        owner: vec![],
+        filters: vec![token_filter],
+        nonempty_txn_signature: None,
+    };
+    ```
+
+    **TypeScript Example:**
+
+    ```typescript
+    const filter = {
+      filters: [
+        {
+          tokenAccountState: true,
+        },
+      ],
+    };
+    ```
+  </Tab>
+
+  <Tab title="Lamports Filter">
+    Filter accounts by their lamport balance:
+
+    ```rust
+    use yellowstone_grpc_proto::prelude::{
+        SubscribeRequestFilterAccountsFilter,
+        SubscribeRequestFilterAccountsFilterLamports,
+        subscribe_request_filter_accounts_filter::Filter as AccountsFilterOneof,
+        subscribe_request_filter_accounts_filter_lamports::Cmp as AccountsFilterLamports,
+    };
+
+    // Filter for accounts with more than 1 SOL
+    let lamports_filter = SubscribeRequestFilterAccountsFilter {
+        filter: Some(AccountsFilterOneof::Lamports(
+            SubscribeRequestFilterAccountsFilterLamports {
+                cmp: Some(AccountsFilterLamports::Gt(1_000_000_000)),
+            },
+        )),
+    };
+
+    let filter = SubscribeRequestFilterAccounts {
+        account: vec![],
+        owner: vec![],
+        filters: vec![lamports_filter],
+        nonempty_txn_signature: None,
+    };
+    ```
+
+    **Lamports Comparison Operators:**
+
+    ```protobuf
+    message SubscribeRequestFilterAccountsFilterLamports {
+      oneof cmp {
+        uint64 eq = 1;  // Equal to
+        uint64 ne = 2;  // Not equal to
+        uint64 lt = 3;  // Less than
+        uint64 gt = 4;  // Greater than
+      }
+    }
+    ```
+
+    **TypeScript Example:**
+
+    ```typescript
+    const filter = {
+      filters: [
+        {
+          lamports: {
+            gt: 1_000_000_000,
+          },
+        },
+      ],
+    };
+    ```
+  </Tab>
+</Tabs>
+
+### Combining Account Filters
+
+Multiple filters work as logical `AND` - an account must match all filters:
+
+```rust
+let filter = SubscribeRequestFilterAccounts {
+    account: vec![],
+    owner: vec!["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()],
+    filters: vec![
+        // Must be a token account (165 bytes)
+        SubscribeRequestFilterAccountsFilter {
+            filter: Some(AccountsFilterOneof::Datasize(165)),
+        },
+        // AND must have valid token account state
+        SubscribeRequestFilterAccountsFilter {
+            filter: Some(AccountsFilterOneof::TokenAccountState(true)),
+        },
+        // AND must have more than 0.01 SOL rent
+        SubscribeRequestFilterAccountsFilter {
+            filter: Some(AccountsFilterOneof::Lamports(
+                SubscribeRequestFilterAccountsFilterLamports {
+                    cmp: Some(AccountsFilterLamports::Gt(10_000_000)),
+                },
+            )),
+        },
+    ],
+    nonempty_txn_signature: None,
+};
+```
+
+### Nonempty Transaction Signature
+
+Filter for accounts that have a transaction signature (updated within a transaction):
+
+```rust
+let filter = SubscribeRequestFilterAccounts {
+    account: vec![],
+    owner: vec!["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()],
+    filters: vec![],
+    nonempty_txn_signature: Some(true),
+};
+```
+
+## Transaction Filters
+
+Transaction filters let you subscribe to specific transactions or transactions involving certain accounts.
+
+```protobuf
+message SubscribeRequestFilterTransactions {
+  optional bool vote = 1;
+  optional bool failed = 2;
+  optional string signature = 5;
+  repeated string account_include = 3;
+  repeated string account_exclude = 4;
+  repeated string account_required = 6;
+}
+```
+
+### Vote and Failed Filters
+
+```rust
+use yellowstone_grpc_proto::prelude::{
+    SubscribeRequestFilterTransactions,
+};
+
+// Only non-vote, successful transactions
+let filter = SubscribeRequestFilterTransactions {
+    vote: Some(false),
+    failed: Some(false),
+    signature: None,
+    account_include: vec![],
+    account_exclude: vec![],
+    account_required: vec![],
+};
+```
+
+**Filter Behavior:**
+- `vote: Some(true)` - Only vote transactions
+- `vote: Some(false)` - Exclude vote transactions
+- `vote: None` - Include both vote and non-vote transactions
+
+Same logic applies to the `failed` field.
+
+### Filter by Specific Signature
+
+```rust
+let filter = SubscribeRequestFilterTransactions {
+    vote: None,
+    failed: None,
+    signature: Some("5j7s6NiJS3JAkvgkoc18WVAsiSaci2pxB2A6ueCJP4tprA2TFg9wSyTLeYouxPBJEMzJinENTkpA52YStRW5Dia7".to_string()),
+    account_include: vec![],
+    account_exclude: vec![],
+    account_required: vec![],
+};
+```
+
+### Account Include Filter
+
+Match transactions that include ANY of the specified accounts:
+
+```rust
+let filter = SubscribeRequestFilterTransactions {
+    vote: Some(false),
+    failed: None,
+    signature: None,
+    account_include: vec![
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string(),
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL".to_string(),
+    ],
+    account_exclude: vec![],
+    account_required: vec![],
+};
+```
+
+### Account Exclude Filter
+
+Exclude transactions that use any of the specified accounts:
+
+```rust
+let filter = SubscribeRequestFilterTransactions {
+    vote: Some(false),
+    failed: None,
+    signature: None,
+    account_include: vec![],
+    account_exclude: vec![
+        "Vote111111111111111111111111111111111111111".to_string(),
+    ],
+    account_required: vec![],
+};
+```
+
+### Account Required Filter
+
+Match transactions that include ALL of the specified accounts:
+
+```rust
+let filter = SubscribeRequestFilterTransactions {
+    vote: Some(false),
+    failed: None,
+    signature: None,
+    account_include: vec![],
+    account_exclude: vec![],
+    account_required: vec![
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string(),
+        "YourProgramId111111111111111111111111111111".to_string(),
+    ],
+};
+```
+
+## Block Filters
+
+Block filters control which block data you receive:
+
+```protobuf
+message SubscribeRequestFilterBlocks {
+  repeated string account_include = 1;
+  optional bool include_transactions = 2;
+  optional bool include_accounts = 3;
+  optional bool include_entries = 4;
+}
+```
+
+### Basic Block Filter
+
+```rust
+use yellowstone_grpc_proto::prelude::{
+    SubscribeRequestFilterBlocks,
+};
+
+let filter = SubscribeRequestFilterBlocks {
+    account_include: vec![],
+    include_transactions: Some(true),
+    include_accounts: Some(false),
+    include_entries: Some(false),
+};
+```
+
+### Filter Blocks by Account Activity
+
+Only receive blocks that have activity for specific accounts:
+
+```rust
+let filter = SubscribeRequestFilterBlocks {
+    account_include: vec![
+        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string(),
+    ],
+    include_transactions: Some(true),
+    include_accounts: Some(true),
+    include_entries: Some(false),
+};
+```
+
+## Slot Filters
+
+Slot filters are simpler and control slot update behavior:
+
+```protobuf
+message SubscribeRequestFilterSlots {
+  optional bool filter_by_commitment = 1;
+  optional bool interslot_updates = 2;
+}
+```
+
+```rust
+use yellowstone_grpc_proto::prelude::{
+    SubscribeRequestFilterSlots,
+};
+
+// Only receive slots at the specified commitment level
+let filter = SubscribeRequestFilterSlots {
+    filter_by_commitment: Some(true),
+    interslot_updates: Some(false),
+};
+```
+
+**Field Descriptions:**
+- `filter_by_commitment`: When `true`, only receive slots matching your commitment level. When `false`, receive all slot status updates.
+- `interslot_updates`: When `true`, receive intermediate slot updates (FIRST_SHRED_RECEIVED, COMPLETED, CREATED_BANK, etc.)
+
+## Practical Examples
+
+<AccordionGroup>
+  <Accordion title="Monitor USDC token accounts with balance > 1000 USDC">
+    ```rust
+    let usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+
+    let filter = SubscribeRequestFilterAccounts {
+        account: vec![],
+        owner: vec!["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()],
+        filters: vec![
+            // Must be a token account
+            SubscribeRequestFilterAccountsFilter {
+                filter: Some(AccountsFilterOneof::Datasize(165)),
+            },
+            // Must be USDC (mint at offset 0)
+            SubscribeRequestFilterAccountsFilter {
+                filter: Some(AccountsFilterOneof::Memcmp(
+                    SubscribeRequestFilterAccountsFilterMemcmp {
+                        offset: 0,
+                        data: Some(AccountsFilterMemcmpOneof::Base58(usdc_mint.to_string())),
+                    },
+                )),
+            },
+        ],
+        nonempty_txn_signature: None,
+    };
+    ```
+  </Accordion>
+
+  <Accordion title="Track all transactions for a specific wallet">
+    ```rust
+    let wallet = "YourWalletAddress111111111111111111111111";
+
+    let filter = SubscribeRequestFilterTransactions {
+        vote: Some(false),
+        failed: None, // Include both successful and failed
+        signature: None,
+        account_include: vec![wallet.to_string()],
+        account_exclude: vec![],
+        account_required: vec![],
+    };
+    ```
+  </Accordion>
+
+  <Accordion title="Monitor swap transactions on a specific DEX">
+    ```rust
+    let dex_program = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"; // Serum
+
+    let filter = SubscribeRequestFilterTransactions {
+        vote: Some(false),
+        failed: Some(false),
+        signature: None,
+        account_include: vec![],
+        account_exclude: vec![],
+        account_required: vec![dex_program.to_string()],
+    };
+    ```
+  </Accordion>
+
+  <Accordion title="Get blocks with specific program activity">
+    ```rust
+    let program_id = "YourProgramId111111111111111111111111111111";
+
+    let filter = SubscribeRequestFilterBlocks {
+        account_include: vec![program_id.to_string()],
+        include_transactions: Some(true),
+        include_accounts: Some(true),
+        include_entries: Some(false),
+    };
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Filter Limits
+
+Servers can impose limits on filters to prevent abuse. Check with your gRPC provider for specific limits.
+
+Example server-side limits:
+```json
+{
+  "accounts": {
+    "max": 1,
+    "account_max": 10,
+    "account_reject": ["TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"],
+    "owner_max": 10
+  },
+  "transactions": {
+    "max": 1,
+    "account_include_max": 10
+  }
+}
+```
+
+## Next Steps
+
+- Use [Data Slicing](/guides/data-slicing) to receive only parts of account data
+- Learn about [Commitment Levels](/guides/commitment-levels) for filtering by confirmation status
+- Understand [Subscribing](/guides/subscribing) for the basics of subscriptions
