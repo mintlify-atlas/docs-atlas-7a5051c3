@@ -358,6 +358,15 @@ let response = client.ping(1).await?;
 println!("Pong count: {}", response.count);
 ```
 
+### Subscribe Replay Info
+
+```rust
+let response = client.subscribe_replay_info().await?;
+if let Some(first_slot) = response.first_available {
+    println!("First available slot for replay: {}", first_slot);
+}
+```
+
 ## Advanced: Ping/Pong for Keep-Alive
 
 Some load balancers require periodic client pings:

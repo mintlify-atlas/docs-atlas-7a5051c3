@@ -694,6 +694,123 @@ func main() {
 
 ---
 
+## SubscribeReplayInfo
+
+Retrieves replay information from the server, specifically the first available slot that can be replayed. This is useful for clients that want to start streaming from historical data.
+
+### Request
+
+<ParamField path="request" type="SubscribeReplayInfoRequest">
+  Empty request message.
+</ParamField>
+
+### Response
+
+<ResponseField name="first_available" type="uint64" optional>
+  The first slot number available for replay. If not set, historical replay is not available.
+</ResponseField>
+
+### Examples
+
+<CodeGroup>
+
+```rust Rust
+use yellowstone_grpc_client::GeyserGrpcClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut client = GeyserGrpcClient::build_from_shared("http://127.0.0.1:10000")?
+        .x_token(Some("your-token-here"))?
+        .connect()
+        .await?;
+
+    let response = client.subscribe_replay_info().await?;
+    
+    if let Some(first_slot) = response.first_available {
+        println!("First available slot for replay: {}", first_slot);
+    } else {
+        println!("Historical replay not available");
+    }
+
+    Ok(())
+}
+```
+
+```typescript TypeScript
+import Client from "@triton-one/yellowstone-grpc";
+
+async function getReplayInfo() {
+  const client = new Client("http://127.0.0.1:10000", "your-token-here");
+  await client.connect();
+
+  const response = await client.subscribeReplayInfo();
+  
+  if (response.firstAvailable) {
+    console.log("First available slot for replay:", response.firstAvailable);
+  } else {
+    console.log("Historical replay not available");
+  }
+}
+
+getReplayInfo().catch(console.error);
+```
+
+```python Python
+import grpc
+import geyser_pb2
+import geyser_pb2_grpc
+
+channel = grpc.insecure_channel("127.0.0.1:10000")
+stub = geyser_pb2_grpc.GeyserStub(channel)
+
+request = geyser_pb2.SubscribeReplayInfoRequest()
+response = stub.SubscribeReplayInfo(request)
+
+if response.HasField('first_available'):
+    print(f"First available slot for replay: {response.first_available}")
+else:
+    print("Historical replay not available")
+```
+
+```go Go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+
+    pb "github.com/rpcpool/yellowstone-grpc/examples/golang/proto"
+    "google.golang.org/grpc"
+)
+
+func main() {
+    conn, err := grpc.Dial("127.0.0.1:10000", grpc.WithInsecure())
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer conn.Close()
+
+    client := pb.NewGeyserClient(conn)
+    request := &pb.SubscribeReplayInfoRequest{}
+    
+    response, err := client.SubscribeReplayInfo(context.Background(), request)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    if response.FirstAvailable != nil {
+        fmt.Printf("First available slot for replay: %d\n", *response.FirstAvailable)
+    } else {
+        fmt.Println("Historical replay not available")
+    }
+}
+```
+
+</CodeGroup>
+
+---
+
 ## Use Cases
 
 <CardGroup cols={2}>
