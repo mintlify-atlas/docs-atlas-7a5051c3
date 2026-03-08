@@ -1,0 +1,121 @@
+{
+  "projectType": "infrastructure",
+  "projectName": "Yellowstone gRPC",
+  "projectDescription": "High-performance gRPC interface for streaming Solana blockchain data via Geyser",
+  "theme": "aspen",
+  "primaryColor": "#8317d1",
+  "lightColor": "#8474e4",
+  "darkColor": "#f0eef3",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Geyser Plugin",
+            "pages": [
+              "plugin/installation",
+              "plugin/configuration",
+              "plugin/deployment"
+            ]
+          },
+          {
+            "group": "Client SDKs",
+            "pages": [
+              "clients/overview",
+              "clients/rust",
+              "clients/typescript",
+              "clients/other-languages"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/subscribing",
+              "guides/filtering",
+              "guides/data-slicing",
+              "guides/commitment-levels",
+              "guides/ping-pong"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/monitoring",
+              "operations/performance",
+              "operations/troubleshooting"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "gRPC Methods",
+            "pages": [
+              "api/subscribe",
+              "api/subscribe-deshred",
+              "api/unary-methods"
+            ]
+          },
+          {
+            "group": "Message Types",
+            "pages": [
+              "api/messages/subscribe-request",
+              "api/messages/subscribe-update",
+              "api/messages/filters",
+              "api/messages/account",
+              "api/messages/transaction",
+              "api/messages/block",
+              "api/messages/slot"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "api/config-schema",
+              "api/filter-limits"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Real-time streaming of Solana accounts, transactions, blocks, and slots",
+    "High-performance gRPC interface with compression support",
+    "Advanced filtering by account, owner, transaction signature, and custom memcmp",
+    "Multiple client SDKs (Rust, TypeScript/Node.js) with examples for Go and Python",
+    "Configurable subscription limits and filter constraints",
+    "Block reconstruction with detailed transaction and account data",
+    "Deshred transactions streaming for pre-execution data",
+    "Unary methods for queries (GetLatestBlockhash, GetBlockHeight, etc.)",
+    "Prometheus metrics and monitoring support"
+  ],
+  "publicApiSurface": [
+    "Subscribe - Streaming RPC for real-time blockchain data",
+    "SubscribeDeshred - Streaming RPC for deshred transactions",
+    "Ping - Check server connectivity",
+    "GetLatestBlockhash - Get latest blockhash",
+    "GetBlockHeight - Get current block height",
+    "GetSlot - Get current slot",
+    "IsBlockhashValid - Validate blockhash",
+    "GetVersion - Get server version",
+    "SubscribeReplayInfo - Get replay information",
+    "GeyserGrpcClient (Rust) - Main client struct",
+    "Client (TypeScript) - Main client class",
+    "SubscribeRequest - Configure subscriptions with filters",
+    "SubscribeUpdate - Receive account/transaction/block/slot updates",
+    "CommitmentLevel - Processed/Confirmed/Finalized",
+    "Filter types - Accounts, Transactions, Blocks, Slots, Entries"
+  ]
+}
